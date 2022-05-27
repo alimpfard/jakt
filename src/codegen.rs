@@ -1717,6 +1717,7 @@ pub fn codegen_type_possibly_as_namespace(
             _ => String::from("auto"),
         },
         Type::TypeVariable(name) => name.clone(),
+        Type::Union(..) => panic!("Union types are now allowed to reach codegen"),
     }
 }
 
@@ -3160,6 +3161,11 @@ fn extract_dependencies_from(
         Type::Builtin => {}
         Type::TypeVariable(_) => {}
         Type::RawPtr(_) => {}
+        Type::Union(types, _) => {
+            for type_id in types {
+                extract_dependencies_from(project, *type_id, deps, graph, false);
+            }
+        }
     }
 }
 

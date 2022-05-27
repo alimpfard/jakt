@@ -47,6 +47,7 @@ pub enum Type {
     Struct(StructId),
     Enum(EnumId),
     RawPtr(TypeId),
+    Union(Vec<TypeId>, Span), // Union members - SORTED!, last union construction span
 }
 
 pub fn is_integer(type_id: TypeId) -> bool {
@@ -546,6 +547,14 @@ impl Project {
             }
             Type::TypeVariable(name) => name.clone(),
             Type::RawPtr(type_id) => format!("raw {}", self.typename_for_type_id(*type_id)),
+            Type::Union(types_ids, _) => format!(
+                "union({})",
+                types_ids
+                    .iter()
+                    .map(|t| self.typename_for_type_id(*t))
+                    .collect::<Vec<_>>()
+                    .join(" or ")
+            ),
         }
     }
 
@@ -3269,10 +3278,26 @@ pub fn typecheck_expression(
 
             (checked_expr, error)
         }
-        ParsedExpression::OptionalNone(span) => (
-            CheckedExpression::OptionalNone(*span, UNKNOWN_TYPE_ID),
-            None,
-        ),
+        ParsedExpression::OptionalNone(span) => {
+            let optional_struct_id = project.get_optional_struct_id(*span);
+            let weakptr_struct_id = project.get_weakptr_struct_id(*span);
+            let type_var_id = project.types.len();
+            project.types.push(Type::TypeVariable(format!(
+                "<anonymous:{}:{}>",
+                span.file_id, span.start
+            )));
+
+            let mut type_set = [optional_struct_id, weakptr_struct_id]
+                .iter()
+                .map(|x| project.find_or_add_type_id(Type::GenericInstance(*x, vec![type_var_id])))
+                .collect::<Vec<_>>();
+
+            type_set.sort_unstable();
+
+            let type_id = project.find_or_add_type_id(Type::Union(type_set, *span));
+
+            (CheckedExpression::OptionalNone(*span, type_id), None)
+        }
         ParsedExpression::OptionalSome(expr, span) => {
             let (checked_expr, err) =
                 typecheck_expression(expr, scope_id, project, safety_mode, None);
@@ -5025,7 +5050,7 @@ fn unify_with_type(
     expected_type: TypeId,
     found_type: TypeId,
     span: Span,
-    project: &Project,
+    project: &mut Project,
 ) -> (TypeId, Option<JaktError>) {
     let mut generic_inferences = HashMap::new();
     let err = check_types_for_compat(
@@ -5045,7 +5070,7 @@ pub fn typecheck_binary_operation(
     rhs: &CheckedExpression,
     scope_id: ScopeId,
     span: Span,
-    project: &Project,
+    project: &mut Project,
 ) -> (TypeId, Option<JaktError>) {
     let lhs_type_id = lhs.type_id(scope_id, project);
     let rhs_type_id = rhs.type_id(scope_id, project);
@@ -5721,8 +5746,38 @@ pub fn check_types_for_compat(
     rhs_type_id: TypeId,
     generic_inferences: &mut HashMap<TypeId, TypeId>,
     span: Span,
-    project: &Project,
+    project: &mut Project,
 ) -> Option<JaktError> {
+    check_types_for_compat_helper(
+        lhs_type_id,
+        rhs_type_id,
+        generic_inferences,
+        span,
+        false,
+        project,
+    )
+}
+
+pub fn check_types_for_compat_helper(
+    lhs_type_id: TypeId,
+    rhs_type_id: TypeId,
+    generic_inferences: &mut HashMap<TypeId, TypeId>,
+    span: Span,
+    is_reverse: bool,
+    project: &mut Project,
+) -> Option<JaktError> {
+    if !is_reverse {
+        println!("check_types_for_compat: {} {}", project.typename_for_type_id(lhs_type_id), project.typename_for_type_id(rhs_type_id));
+        // Try the reverse order to resolve type vars that are in the rhs.
+        _ = check_types_for_compat_helper(
+            rhs_type_id,
+            lhs_type_id,
+            generic_inferences,
+            span,
+            true,
+            project,
+        )
+    }
     let mut error = None;
     let lhs_type = &project.types[lhs_type_id];
 
@@ -5732,14 +5787,68 @@ pub fn check_types_for_compat(
     // This skips the type compatibility check if assigning a T to a T? or to a
     // weak T? without going through `Some`.
     if let Type::GenericInstance(lhs_struct_id, args) = lhs_type {
-        if (*lhs_struct_id == optional_struct_id || *lhs_struct_id == weak_ptr_struct_id)
-            && args.first().map_or(false, |arg_id| *arg_id == rhs_type_id)
-        {
-            return None;
+        if *lhs_struct_id == optional_struct_id || *lhs_struct_id == weak_ptr_struct_id {
+            let first = args.first().map(|x| *x);
+            if let Some(first) = first {
+                if check_types_for_compat(first, rhs_type_id, generic_inferences, span, project).is_none() {
+                    return None;
+                }
+            }
         }
     }
 
+    let lhs_type = &project.types[lhs_type_id];
     match lhs_type {
+        Type::Union(type_ids, ..) => {
+            // Check if any of the types in the union are compatible with the rhs,
+            // if so, replace the union with it - but make sure to not do so if
+            // the rhs is a type variable (as those will always be compatible).
+            let mut matching_type_id = None;
+            let mut matched = false;
+            if let Type::TypeVariable(_) = &project.types[rhs_type_id] {
+                // Record a substitution, but don't replace the union.
+                generic_inferences.insert(rhs_type_id, lhs_type_id);
+                matched = true;
+            } else {
+                let type_ids = type_ids.iter().map(|x| *x).collect::<Vec<_>>();
+                for type_id in type_ids {
+                    let mut inference_copy = generic_inferences.clone();
+                    if let None = check_types_for_compat_helper(
+                        type_id,
+                        rhs_type_id,
+                        &mut inference_copy,
+                        span,
+                        is_reverse,
+                        project,
+                    ) {
+                        *generic_inferences = inference_copy;
+                        matching_type_id = Some(type_id);
+                        matched = true;
+                        println!("{:?} matched type: {:?}", project.typename_for_type_id(rhs_type_id), project.typename_for_type_id(type_id));
+                        break;
+                    }
+                }
+            }
+
+            match matching_type_id {
+                Some(type_id) => {
+                    // We found it, so replace the union with the matching type.
+                    let type_id = substitute_typevars_in_type(type_id, generic_inferences, project);
+                    project.types[lhs_type_id] = project.types[type_id].clone();
+                }
+                None if !matched => {
+                    error = error.or(Some(JaktError::TypecheckError(
+                        format!(
+                            "Type mismatch: expected ‘{}’, but got ‘{}’",
+                            project.typename_for_type_id(lhs_type_id),
+                            project.typename_for_type_id(rhs_type_id),
+                        ),
+                        span,
+                    )))
+                }
+                _ => {}
+            }
+        }
         Type::TypeVariable(_) => {
             // If the call expects a generic type variable, let's see if we've already seen it
             if let Some(seen_type_id) = generic_inferences.get(&lhs_type_id) {
