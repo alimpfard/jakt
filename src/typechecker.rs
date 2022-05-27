@@ -5758,6 +5758,48 @@ pub fn check_types_for_compat(
     )
 }
 
+fn merge_types_as_union(
+    existing_type_id: TypeId,
+    new_type_id: TypeId,
+    span: Span,
+    project: &mut Project,
+) -> TypeId {
+    let existing_type = &project.types[existing_type_id];
+    let new_type = &project.types[new_type_id];
+
+    let type_id_set_to_add = match new_type {
+        Type::Union(types, _) => types.clone(),
+        _ => vec![new_type_id],
+    };
+
+    let mut new_types = match existing_type {
+        Type::Union(types, _) => types
+            .iter()
+            .chain(type_id_set_to_add.iter())
+            .map(|x| *x)
+            .collect::<HashSet<_>>(),
+
+        _ => {
+            let mut types = type_id_set_to_add
+                .iter()
+                .map(|x| *x)
+                .collect::<HashSet<_>>();
+            types.insert(existing_type_id);
+            types
+        }
+    }
+    .iter()
+    .map(|x| *x)
+    .collect::<Vec<_>>();
+
+    if new_types.len() == 1 {
+        *new_types.iter().next().unwrap()
+    } else {
+        new_types.sort_unstable();
+        project.find_or_add_type_id(Type::Union(new_types, span))
+    }
+}
+
 pub fn check_types_for_compat_helper(
     lhs_type_id: TypeId,
     rhs_type_id: TypeId,
@@ -5767,7 +5809,6 @@ pub fn check_types_for_compat_helper(
     project: &mut Project,
 ) -> Option<JaktError> {
     if !is_reverse {
-        println!("check_types_for_compat: {} {}", project.typename_for_type_id(lhs_type_id), project.typename_for_type_id(rhs_type_id));
         // Try the reverse order to resolve type vars that are in the rhs.
         _ = check_types_for_compat_helper(
             rhs_type_id,
@@ -5790,7 +5831,9 @@ pub fn check_types_for_compat_helper(
         if *lhs_struct_id == optional_struct_id || *lhs_struct_id == weak_ptr_struct_id {
             let first = args.first().map(|x| *x);
             if let Some(first) = first {
-                if check_types_for_compat(first, rhs_type_id, generic_inferences, span, project).is_none() {
+                if check_types_for_compat(first, rhs_type_id, generic_inferences, span, project)
+                    .is_none()
+                {
                     return None;
                 }
             }
@@ -5803,8 +5846,8 @@ pub fn check_types_for_compat_helper(
             // Check if any of the types in the union are compatible with the rhs,
             // if so, replace the union with it - but make sure to not do so if
             // the rhs is a type variable (as those will always be compatible).
-            let mut matching_type_id = None;
             let mut matched = false;
+            let mut matching_type_ids_and_their_substitutions = HashMap::new();
             if let Type::TypeVariable(_) = &project.types[rhs_type_id] {
                 // Record a substitution, but don't replace the union.
                 generic_inferences.insert(rhs_type_id, lhs_type_id);
@@ -5821,22 +5864,13 @@ pub fn check_types_for_compat_helper(
                         is_reverse,
                         project,
                     ) {
-                        *generic_inferences = inference_copy;
-                        matching_type_id = Some(type_id);
-                        matched = true;
-                        println!("{:?} matched type: {:?}", project.typename_for_type_id(rhs_type_id), project.typename_for_type_id(type_id));
-                        break;
+                        matching_type_ids_and_their_substitutions.insert(type_id, inference_copy);
                     }
                 }
             }
 
-            match matching_type_id {
-                Some(type_id) => {
-                    // We found it, so replace the union with the matching type.
-                    let type_id = substitute_typevars_in_type(type_id, generic_inferences, project);
-                    project.types[lhs_type_id] = project.types[type_id].clone();
-                }
-                None if !matched => {
+            if matching_type_ids_and_their_substitutions.is_empty() {
+                if !matched {
                     error = error.or(Some(JaktError::TypecheckError(
                         format!(
                             "Type mismatch: expected ‘{}’, but got ‘{}’",
@@ -5846,7 +5880,37 @@ pub fn check_types_for_compat_helper(
                         span,
                     )))
                 }
-                _ => {}
+            } else {
+                let mut new_set = Vec::new();
+                for (id, substitution) in matching_type_ids_and_their_substitutions {
+                    for key in substitution.keys() {
+                        if let Some(existing_type_id) = generic_inferences.get(key) {
+                            // Merge the two types.
+                            let new_type_id =
+                                merge_types_as_union(*existing_type_id, id, span, project);
+                            generic_inferences.insert(*key, new_type_id);
+                        } else {
+                            generic_inferences.insert(*key, *substitution.get(key).unwrap());
+                        }
+                        new_set.push(*key);
+                    }
+                }
+
+                let new_type_id = if new_set.len() == 1 {
+                    let type_id = new_set[0];
+                    substitute_typevars_in_type(type_id, generic_inferences, project)
+                } else {
+                    let union_type = Type::Union(
+                        new_set
+                            .iter()
+                            .map(|x| substitute_typevars_in_type(*x, generic_inferences, project))
+                            .collect(),
+                        span,
+                    );
+                    project.find_or_add_type_id(union_type)
+                };
+
+                project.types[lhs_type_id] = project.types[new_type_id].clone();
             }
         }
         Type::TypeVariable(_) => {
