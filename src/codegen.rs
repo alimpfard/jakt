@@ -146,10 +146,12 @@ pub fn codegen(project: &Project, scope: &Scope) -> String {
         control_flow_state: ControlFlowState::no_control_flow(),
     };
 
+    output.push_str("namespace Jakt {\n");
     output.push_str(&codegen_namespace_predecl(project, scope, &mut context));
     output.push_str(&codegen_namespace(project, scope, &mut context));
 
     output.push_str(&context.deferred_output);
+    output.push_str("} // namespace Jakt\n");
 
     output
 }
@@ -1225,8 +1227,6 @@ fn codegen_ak_formatter(
 
     let mut output = String::new();
 
-    output.push_str("namespace AK {");
-
     output.push_str("template<");
     output.push_str(&template_args);
     output.push('>');
@@ -1243,9 +1243,7 @@ fn codegen_ak_formatter(
         "return Formatter<StringView>::format(builder, MUST(value.debug_description())); }",
     );
 
-    output.push_str("};");
-
-    output.push_str("} ");
+    output.push_str("};\n");
 
     output
 }
@@ -1522,7 +1520,7 @@ fn codegen_function_in_namespace(
     output.push(' ');
     let is_main = function.name == "main" && containing_struct.is_none();
     if is_main {
-        output.push_str("JaktMain::main");
+        output.push_str("main");
     } else {
         let qualifier = containing_struct
             .map(|type_id| codegen_type_possibly_as_namespace(type_id, project, true));
