@@ -66,7 +66,7 @@ impl Compiler {
             return (ParsedNamespace::new(), err);
         }
 
-        parse_namespace(&lexed, &mut 0, self)
+        parse_namespace(&lexed, &mut 0, self, true)
     }
 
     pub fn find_and_include_module(
@@ -105,7 +105,7 @@ impl Compiler {
             self.raw_files.len() - 1,
             &self.raw_files[self.raw_files.len() - 1].1,
         );
-        let (file, _) = parse_namespace(&lexed, &mut 0, self);
+        let (file, _) = parse_namespace(&lexed, &mut 0, self, true);
 
         // Scope ID 0 is the global project-level scope that all files can see
         error = error.or(typecheck_namespace_predecl(&file, 0, project));

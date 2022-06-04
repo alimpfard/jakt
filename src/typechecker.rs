@@ -1409,6 +1409,8 @@ pub struct Scope {
     // Namespaces may also have children that are also namespaces
     pub children: Vec<ScopeId>,
     pub throws: bool,
+    pub import_path: Option<String>,
+    pub is_extern: bool,
 }
 
 impl Scope {
@@ -1423,6 +1425,8 @@ impl Scope {
             parent,
             children: Vec::new(),
             throws,
+            import_path: None,
+            is_extern: false,
         }
     }
 
@@ -1641,8 +1645,14 @@ pub fn typecheck_namespace_predecl(
         // Do full typechecks of all the namespaces that are children of this namespace
         if namespace.name.is_some() {
             let namespace_scope_id = project.create_scope(scope_id, false);
-            project.scopes[namespace_scope_id].namespace_name = namespace.name.clone();
+            let namespace_scope = &mut project.scopes[namespace_scope_id];
+            namespace_scope.namespace_name = namespace.name.clone();
+            namespace_scope.import_path = namespace.import_path.clone();
+            namespace_scope.is_extern =
+                namespace.import_path.is_some() || parsed_namespace.import_path.is_some();
+
             project.scopes[scope_id].children.push(namespace_scope_id);
+
             let err = typecheck_namespace_predecl(namespace, namespace_scope_id, project);
             error = error.or(err);
         }
@@ -1667,26 +1677,36 @@ pub fn typecheck_namespace_declarations(
     let mut error = None;
 
     for namespace in parsed_namespace.namespaces.iter() {
-        if let Some(namespace_name) = &namespace.name {
-            // Finish typecheck of the named namespaces
-            let namespace_scope_id = project
-                .find_namespace_in_scope(scope_id, namespace_name)
-                .expect("internal error: can't find previously added namespace");
+        let is_inline = namespace.import_path.is_some()
+            && matches!(&namespace.name, Some(name) if name == "anon");
+        match &namespace.name {
+            Some(namespace_name) if !is_inline => {
+                // Finish typecheck of the named namespaces
+                let namespace_scope_id = project
+                    .find_namespace_in_scope(scope_id, namespace_name)
+                    .expect("internal error: can't find previously added namespace");
 
-            let err = typecheck_namespace_declarations(namespace, namespace_scope_id, project);
-            error = error.or(err);
-        } else {
-            // Create a typecheck the unnamed namespace (aka a block scope)
+                let err = typecheck_namespace_declarations(namespace, namespace_scope_id, project);
+                error = error.or(err);
+            }
+            _ => {
+                // Create a typecheck the unnamed namespace (aka a block scope)
+                let namespace_scope_id = if is_inline {
+                    scope_id
+                } else {
+                    let namespace_scope_id = project.create_scope(scope_id, false);
+                    project.scopes[namespace_scope_id].namespace_name = namespace.name.clone();
+                    project.scopes[scope_id].children.push(namespace_scope_id);
+                    namespace_scope_id
+                };
 
-            let namespace_scope_id = project.create_scope(scope_id, false);
-            project.scopes[namespace_scope_id].namespace_name = namespace.name.clone();
-            project.scopes[scope_id].children.push(namespace_scope_id);
-            typecheck_namespace_predecl(namespace, namespace_scope_id, project);
-            error = error.or(typecheck_namespace_declarations(
-                parsed_namespace,
-                namespace_scope_id,
-                project,
-            ))
+                typecheck_namespace_predecl(namespace, namespace_scope_id, project);
+                error = error.or(typecheck_namespace_declarations(
+                    namespace,
+                    namespace_scope_id,
+                    project,
+                ))
+            }
         }
     }
 

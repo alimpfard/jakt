@@ -114,6 +114,7 @@ pub struct ParsedNamespace {
     pub structs: Vec<ParsedStruct>,
     pub enums: Vec<ParsedEnum>,
     pub namespaces: Vec<ParsedNamespace>,
+    pub import_path: Option<String>,
 }
 
 #[derive(Debug)]
@@ -501,8 +502,180 @@ impl ParsedNamespace {
             structs: Vec::new(),
             enums: Vec::new(),
             namespaces: Vec::new(),
+            import_path: None,
         }
     }
+}
+
+fn parse_import_extern(
+    tokens: &[Token],
+    index: &mut usize,
+    compiler: &mut Compiler,
+) -> (ParsedNamespace, Option<JaktError>) {
+    // `import extern . [c] "path" namespace-defintion`
+    let mut error = None;
+    let mut is_c = false;
+    let mut path = None;
+    let mut namespace_name = None;
+
+    if let Token {
+        contents: TokenContents::Name(name),
+        ..
+    } = &tokens[*index]
+    {
+        if name.eq_ignore_ascii_case("c") {
+            is_c = true;
+            *index += 1;
+        } else {
+            error = error.or(Some(JaktError::ParserError(
+                "Expected 'c' or a file path after `import extern`".into(),
+                tokens[*index].span,
+            )));
+        }
+    }
+
+    if let Some(Token {
+        contents: TokenContents::QuotedString(string),
+        ..
+    }) = tokens.get(*index)
+    {
+        path = Some(string.clone());
+        *index += 1;
+    } else {
+        error = error.or(Some(JaktError::ParserError(
+            "Expected a file path after `import extern`".into(),
+            tokens[*index].span,
+        )));
+    }
+
+    let as_name = tokens.get(*index..*index + 2).map(|x| (&x[0], &x[1]));
+    if let Some((
+        Token {
+            contents: TokenContents::Name(keyword),
+            ..
+        },
+        Token {
+            contents: TokenContents::Name(as_name),
+            ..
+        },
+    )) = as_name
+    {
+        if keyword != "as" {
+            error = error.or(Some(JaktError::ParserError(
+                "Expected an optional 'as <name>' after import extern".into(),
+                tokens[*index].span,
+            )));
+        } else {
+            namespace_name = Some(as_name.clone());
+            *index += 2;
+        }
+    }
+
+    if !matches!(
+        tokens.get(*index),
+        Some(Token {
+            contents: TokenContents::LCurly,
+            ..
+        })
+    ) {
+        error = error.or(Some(JaktError::ParserError(
+            "Expected a namespace definition after import extern".into(),
+            tokens[*index].span,
+        )));
+    } else {
+        *index += 1;
+    }
+
+    let (mut namespace, err) = parse_namespace(tokens, index, compiler, false);
+    error = error.or(err);
+
+    for f in &namespace.functions {
+        if f.linkage != FunctionLinkage::External {
+            error = error.or(Some(JaktError::ParserError(
+                "Expected all functions in an `import extern` to be external".into(),
+                f.name_span,
+            )));
+        }
+        if is_c && !f.generic_parameters.is_empty() {
+            error = error.or(Some(JaktError::ParserErrorWithHint(
+                format!(
+                    "imported function '{}' is declared to have C linkage, but is generic",
+                    f.name
+                ),
+                f.name_span,
+                "this function may not be generic".into(),
+                f.name_span,
+            )));
+        }
+
+        if !f.block.stmts.is_empty() {
+            error = error.or(Some(JaktError::ParserError(
+                "imported extern function is not allowed to have a body".into(),
+                f.name_span,
+            )));
+        }
+    }
+
+    for struct_ in &namespace.structs {
+        if struct_.definition_linkage != DefinitionLinkage::External {
+            error = error.or(Some(JaktError::ParserError(
+                "Expected all structs in an `import extern` to be external".into(),
+                struct_.name_span,
+            )));
+        }
+        if is_c && !struct_.generic_parameters.is_empty() {
+            error = error.or(Some(JaktError::ParserErrorWithHint(
+                format!(
+                    "imported struct '{}' is declared to have C linkage, but is generic",
+                    struct_.name
+                ),
+                struct_.name_span,
+                "this struct may not be generic".into(),
+                struct_.name_span,
+            )));
+        }
+    }
+
+    for enum_ in &namespace.enums {
+        if enum_.definition_linkage != DefinitionLinkage::External {
+            error = error.or(Some(JaktError::ParserError(
+                "Expected all enums in an `import extern` to be external".into(),
+                enum_.name_span,
+            )));
+        }
+        if is_c {
+            error = error.or(Some(JaktError::ParserErrorWithHint(
+                "Cannot import enums with C linkage".into(),
+                enum_.name_span,
+                format!(
+                    "imported enum '{}' is declared to have C linkage",
+                    enum_.name
+                ),
+                enum_.name_span,
+            )));
+        }
+    }
+
+    namespace.name = namespace_name;
+
+    if !matches!(
+        tokens.get(*index),
+        Some(Token {
+            contents: TokenContents::RCurly,
+            ..
+        })
+    ) {
+        error = error.or(Some(JaktError::ParserError(
+            "Expected a closing curly brace".into(),
+            tokens[*index].span,
+        )));
+    } else {
+        *index += 1;
+    }
+
+    namespace.import_path = path;
+
+    (namespace, error)
 }
 
 fn parse_import(
@@ -513,12 +686,20 @@ fn parse_import(
     let mut error = None;
     *index += 1;
 
-    if *index < tokens.len() {
-        if let Token {
+    match tokens.get(*index) {
+        Some(Token {
+            contents: TokenContents::Name(name),
+            ..
+        }) if name == "extern" => {
+            *index += 1;
+            let (namespace, err) = parse_import_extern(tokens, index, compiler);
+            error = error.or(err);
+            return (namespace, error);
+        }
+        Some(Token {
             contents: TokenContents::Name(module_name),
             span,
-        } = &tokens[*index]
-        {
+        }) => {
             *index += 1;
             let (mut namespace, err) = compiler.find_and_include_module(module_name, *span);
             namespace.name = Some(module_name.clone());
@@ -553,17 +734,19 @@ fn parse_import(
             }
 
             return (namespace, error);
-        } else {
+        }
+        Some(_) => {
             error = error.or(Some(JaktError::ParserError(
-                "Expected module name after import keyword".to_string(),
+                "Expected module name or 'extern' after import keyword".to_string(),
                 tokens[*index].span,
             )));
         }
-    } else {
-        error = error.or(Some(JaktError::ParserError(
-            "expected name after import keyword".to_string(),
-            tokens[*index - 1].span,
-        )));
+        None => {
+            error = error.or(Some(JaktError::ParserError(
+                "expected name after import keyword".to_string(),
+                tokens[*index - 1].span,
+            )));
+        }
     }
 
     (ParsedNamespace::new(), error)
@@ -573,6 +756,7 @@ pub fn parse_namespace(
     tokens: &[Token],
     index: &mut usize,
     compiler: &mut Compiler,
+    is_top_level: bool,
 ) -> (ParsedNamespace, Option<JaktError>) {
     trace!("parse_namespace");
 
@@ -666,7 +850,8 @@ pub fn parse_namespace(
                         if let TokenContents::LCurly = &tokens[*index].contents {
                             *index += 1;
 
-                            let (mut namespace, err) = parse_namespace(tokens, index, compiler);
+                            let (mut namespace, err) =
+                                parse_namespace(tokens, index, compiler, false);
                             error = error.or(err);
 
                             *index += 1;
@@ -681,6 +866,14 @@ pub fn parse_namespace(
                     }
                 }
                 "import" => {
+                    if !is_top_level
+                        && matches!(tokens.get(*index + 1), Some(Token{contents: TokenContents::Name(name), ..}) if name == "extern")
+                    {
+                        error = error.or(Some(JaktError::ParserError(
+                            "Extern imports are only allowed at the top level".to_string(),
+                            tokens[*index].span,
+                        )));
+                    }
                     let (namespace, err) = parse_import(tokens, index, compiler);
                     error = error.or(err);
                     parsed_namespace.namespaces.push(namespace);

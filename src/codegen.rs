@@ -137,6 +137,25 @@ pub fn codegen(project: &Project, scope: &Scope) -> String {
     let mut output = String::new();
 
     output.push_str("#include <lib.h>\n");
+
+    for scope_id in &scope.children {
+        let scope = &project.scopes[*scope_id];
+        if let Some(import) = &scope.import_path {
+            let name = scope
+                .namespace_name
+                .as_ref()
+                .expect("imported scope has no namespace");
+            let is_anonymous = name == "anon";
+            if !is_anonymous {
+                output.push_str(&format!("namespace {} {{\n", name));
+            }
+            output.push_str(&format!("#include <{}>\n", import));
+            if !is_anonymous {
+                output.push_str("}\n");
+            }
+        }
+    }
+
     let mut context = CodegenContext {
         namespace_stack: Vec::new(),
         deferred_output: String::new(),
@@ -161,9 +180,17 @@ fn codegen_namespace_predecl(
     scope: &Scope,
     context: &mut CodegenContext,
 ) -> String {
+    if scope.is_extern {
+        return String::new();
+    }
+
     let mut output = String::new();
     if let Some(name) = &scope.namespace_name {
-        output.push_str(&format!("namespace {} {{\n", name));
+        if name == "anonymous" {
+            output.push_str("namespace {\n");
+        } else {
+            output.push_str(&format!("namespace {} {{\n", name));
+        }
     }
 
     // Visit the types.
@@ -219,6 +246,10 @@ fn codegen_namespace_predecl(
 }
 
 fn codegen_namespace(project: &Project, scope: &Scope, context: &mut CodegenContext) -> String {
+    if scope.is_extern {
+        return String::new();
+    }
+
     let mut output = String::new();
 
     // Figure out the right order to output the structs
@@ -294,9 +325,17 @@ fn codegen_namespace(project: &Project, scope: &Scope, context: &mut CodegenCont
     for child_scope_id in &scope.children {
         // For now, require children of the current namespace to have names before being emitted
         let child_scope = &project.scopes[*child_scope_id];
+        if child_scope.is_extern {
+            continue;
+        }
+
         if let Some(name) = &child_scope.namespace_name {
             context.namespace_stack.push(name.clone());
-            output.push_str(&format!("namespace {} {{\n", name));
+            if name == "anonymous" {
+                output.push_str("namespace {\n");
+            } else {
+                output.push_str(&format!("namespace {} {{\n", name));
+            }
             output.push_str(&codegen_namespace(project, child_scope, context));
             output.push_str("}\n");
             context.namespace_stack.pop();

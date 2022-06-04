@@ -176,25 +176,41 @@ fn main() -> Result<(), JaktError> {
                                 .as_ref()
                                 .unwrap_or(&default_cxx_compiler_path),
                         )
-                        .args([
-                            "-fcolor-diagnostics",
-                            "-std=c++20",
-                            // Don't complain about unsupported -W flags below.
-                            "-Wno-unknown-warning-option",
-                            // Sometimes our generated C++ has a lot of harmless parentheses.
-                            "-Wno-parentheses-equality",
-                            // These warnings if enabled create loads of unnecessary noise:
-                            "-Wno-unqualified-std-cast-call",
-                            "-Wno-user-defined-literals",
-                            // This warning can happen for functions like fopen which Windows has deprecated but others not.
-                            // Specifically, it will happen if clang uses the MSVC runtime and/or linker.
-                            "-Wno-deprecated-declarations",
-                            "-I",
-                            &runtime_path,
-                            &input_cpp,
-                            "-o",
-                            &output_executable,
-                        ])
+                        .args(
+                            arguments
+                                .system_include_paths
+                                .iter()
+                                .flat_map(|x| ["-I", x.to_str().unwrap()])
+                                .chain(
+                                    arguments
+                                        .system_lib_paths
+                                        .iter()
+                                        .flat_map(|x| ["-L", x.to_str().unwrap()]),
+                                )
+                                .chain(arguments.link_libs.iter().flat_map(|x| ["-l", x.as_str()]))
+                                .chain(
+                                    [
+                                        "-fcolor-diagnostics",
+                                        "-std=c++20",
+                                        // Don't complain about unsupported -W flags below.
+                                        "-Wno-unknown-warning-option",
+                                        // Sometimes our generated C++ has a lot of harmless parentheses.
+                                        "-Wno-parentheses-equality",
+                                        // These warnings if enabled create loads of unnecessary noise:
+                                        "-Wno-unqualified-std-cast-call",
+                                        "-Wno-user-defined-literals",
+                                        // This warning can happen for functions like fopen which Windows has deprecated but others not.
+                                        // Specifically, it will happen if clang uses the MSVC runtime and/or linker.
+                                        "-Wno-deprecated-declarations",
+                                        "-I",
+                                        &runtime_path,
+                                        &input_cpp,
+                                        "-o",
+                                        &output_executable,
+                                    ]
+                                    .into_iter(),
+                                ),
+                        )
                         .output()?;
                         io::stderr().write_all(&clang_output.stderr)?;
                         if !clang_output.status.success() {
@@ -255,32 +271,36 @@ const USAGE: &str = "usage: jakt [-h,-S] [OPTIONS] [FILES...]";
 // FIXME: Once format is stable as a const function, include USAGE in this string.
 const HELP: &str = "\
 Flags:
-  -h,--help                     Print this help and exit.
-  -p,--prettify-cpp-source      Run emitted C++ source through clang-format.
-  -S,--emit-cpp-source-only     Only emit the generated C++ source, do not compile.
-  -c,--check-only               Only check the code for errors
-  -j,--json-errors              Emit machine-readable (JSON) errors
-  -H,--type-hints               Emit machine-readable type hints (for IDE integration)
+  -h,--help                          Print this help and exit.
+  -p,--prettify-cpp-source           Run emitted C++ source through clang-format.
+  -S,--emit-cpp-source-only          Only emit the generated C++ source, do not compile.
+  -c,--check-only                    Only check the code for errors
+  -j,--json-errors                   Emit machine-readable (JSON) errors
+  -H,--type-hints                    Emit machine-readable type hints (for IDE integration)
 
 Options:
-  -o,--binary-dir PATH          Output directory for compiled files.
-                                Defaults to $PWD/build.
-  -C,--cxx-compiler-path PATH   Path of the C++ compiler to use when compiling the generated sources.
-                                Defaults to clang++.
-  -F,--clang-format-path PATH   Path to clang-format executable.
-                                Defaults to clang-format.
-  -R,--runtime-path PATH        Path of the Jakt runtime headers.
-                                Defaults to $PWD/runtime.
-  -I,--include-path PATH        Add an include path for imported Jakt files.
-                                Can be specified multiple times.
-  -g,--goto-def INDEX           Return the span for the definition at index.
-  -t,--goto-type-def INDEX      Return the span for the type definition at index.
-  -v,--hover INDEX              Return the type of element at index.
-  -m,--completions INDEX        Return dot completions at index.
+  -o,--binary-dir PATH               Output directory for compiled files.
+                                     Defaults to $PWD/build.
+  -C,--cxx-compiler-path PATH        Path of the C++ compiler to use when compiling the generated sources.
+                                     Defaults to clang++.
+  -F,--clang-format-path PATH        Path to clang-format executable.
+                                     Defaults to clang-format.
+  -R,--runtime-path PATH             Path of the Jakt runtime headers.
+                                     Defaults to $PWD/runtime.
+  -I,--include-path PATH             Add an include path for imported Jakt files.
+                                     Can be specified multiple times.
+  -g,--goto-def INDEX                Return the span for the definition at index.
+  -t,--goto-type-def INDEX           Return the span for the type definition at index.
+  -v,--hover INDEX                   Return the type of element at index.
+  -m,--completions INDEX             Return dot completions at index.
+  -II, --system-include-path PATH    Add a system include path for the C++ compiler.
+                                     Can be specified multiple times.
+  -l, --link-lib LIB                 Link a library to the generated binary.
+                                     Can be specified multiple times.
 
 Arguments:
-  FILES...                      List of files to compile. The outputs are
-                                `<input-filename>.cpp` in the binary directory.
+  FILES...                           List of files to compile. The outputs are
+                                     `<input-filename>.cpp` in the binary directory.
 ";
 
 #[derive(Debug)]
@@ -288,6 +308,7 @@ struct JaktArguments {
     binary_directory: Option<PathBuf>,
     input_files: Vec<PathBuf>,
     include_paths: Vec<PathBuf>,
+    system_include_paths: Vec<PathBuf>,
     emit_source_only: bool,
     check_only: bool,
     type_hints: bool,
@@ -297,6 +318,8 @@ struct JaktArguments {
     hover_index: Option<usize>,
     completions_index: Option<usize>,
     cxx_compiler_path: Option<PathBuf>,
+    link_libs: Vec<String>,
+    system_lib_paths: Vec<PathBuf>,
     prettify_cpp_source: bool,
     clang_format_path: Option<PathBuf>,
     runtime_path: Option<PathBuf>,
@@ -321,11 +344,27 @@ fn parse_arguments() -> JaktArguments {
         .values_from_fn(["-I", "--include-path"], convert_to_pathbuf)
         .unwrap_or_default();
 
+    let system_include_paths = pico_arguments
+        .values_from_fn(["-II", "--system-include-path"], convert_to_pathbuf)
+        .unwrap_or_default();
+
+    let link_libs = pico_arguments
+        .values_from_fn(
+            ["-l", "--link-lib"],
+            |s: &str| -> Result<String, &'static str> { Ok(s.to_string()) },
+        )
+        .unwrap_or_default();
+
+    let system_lib_paths = pico_arguments
+        .values_from_fn(["-LL", "--system-lib-path"], convert_to_pathbuf)
+        .unwrap_or_default();
+
     let mut arguments = JaktArguments {
         binary_directory: None,
         input_files: Vec::new(),
         include_paths,
         emit_source_only,
+        system_include_paths,
         check_only,
         type_hints,
         json_errors,
@@ -337,6 +376,8 @@ fn parse_arguments() -> JaktArguments {
         prettify_cpp_source,
         clang_format_path: None,
         runtime_path: None,
+        link_libs,
+        system_lib_paths,
     };
 
     let mut get_path_arg = |keys| {
