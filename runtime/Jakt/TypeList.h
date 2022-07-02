@@ -32,6 +32,21 @@ struct TypeList {
 
     template<unsigned N>
     using Type = typename TypeListElement<N, TypeList<Types...>>::Type;
+
+    template<typename T>
+    static constexpr bool contains()
+    {
+        return (IsSame<Types, T> || ...);
+    }
+
+    template<typename T>
+    static constexpr size_t index_of()
+    {
+        size_t index = 0;
+        ((IsSame<Types, T> && ++index) || ...);
+        VERIFY(index > 0);
+        return index - 1;
+    }
 };
 
 template<typename T>

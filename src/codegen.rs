@@ -552,6 +552,162 @@ fn codegen_enum(enum_: &CheckedEnum, project: &Project, context: &mut CodegenCon
     }
 }
 
+fn codegen_enum_definition_partial(enum_: &CheckedEnum, project: &Project, context: &mut CodegenContext) -> String {
+    let mut output = String::new();
+    // Now define the variant itself.
+    let is_generic = !enum_.generic_parameters.is_empty();
+    let generic_parameter_names = enum_
+        .generic_parameters
+        .iter()
+        .map(|p| match &project.get_type(*p) {
+            Type::TypeVariable(name) => name.clone(),
+            _ => unreachable!(),
+        })
+        .collect::<Vec<_>>();
+    let template_args = generic_parameter_names
+        .iter()
+        .map(|p| "typename ".to_string() + p)
+        .collect::<Vec<_>>()
+        .join(", ");
+    if is_generic {
+        output.push_str("template<");
+        output.push_str(template_args.as_str());
+        output.push_str(">\n");
+    }
+    output.push_str("struct ");
+    output.push_str(&enum_.name);
+    if enum_.definition_type == DefinitionType::Class {
+        output.push_str(": public RefCounted<");
+        output.push_str(&enum_.name);
+        if is_generic {
+            output.push('<');
+            output.push_str(generic_parameter_names.join(", ").as_str());
+            output.push('>');
+        }
+        output.push('>');
+    }
+
+    output.push_str(" {\n");
+    output.push_str("private:\n");
+    output.push_str("    union Members {\n");
+    output.push_str("        u8 invalid;\n");
+    // Actual dtor invoked in ~struct().
+    output.push_str("        ~Members() {}\n");
+    let mut variant_args = String::new();
+    let mut variant_names = Vec::new();
+    for (index, variant) in enum_.variants.iter().enumerate() {
+        match variant {
+            CheckedEnumVariant::StructLike(name, _, _)
+            | CheckedEnumVariant::Untyped(name, _)
+            | CheckedEnumVariant::Typed(name, _, _) => {
+                variant_args.push_str("        ");
+                variant_args.push_str(&enum_.name);
+                variant_args.push_str("_Details::");
+                variant_args.push_str(name);
+                variant_names.push(name.clone());
+                if is_generic {
+                    variant_args.push('<');
+                    variant_args.push_str(generic_parameter_names.join(", ").as_str());
+                    variant_args.push('>');
+                }
+                let _ = write!(variant_args, " _{};\n", index);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    output.push_str(&variant_args);
+    output.push_str("    } m_member;\n");
+    output.push_str("    size_t m_index;\n");
+
+    output.push_str("public:\n");
+    output.push_str("    size_t index() const { return m_index; }\n");
+
+    for (index, name) in variant_names.iter().enumerate() {
+        output.push_str("    using ");
+        output.push_str(name);
+        output.push_str(" = ");
+        output.push_str(&enum_.name);
+        output.push_str("_Details::");
+        output.push_str(name);
+        if is_generic {
+            output.push('<');
+            output.push_str(generic_parameter_names.join(", ").as_str());
+            output.push('>');
+        }
+        output.push_str(";\n");
+        let _ = write!(output, "    {}({} value) : m_member{{ ._{} = move(value) }}, m_index({}) {{}}", &enum_.name, name, index, index);
+    }
+
+    // dtor
+    let _ = write!(output, "    ~{}() {{\n", &enum_.name);
+    output.push_str("        switch (m_index) {\n");
+    for (index, name) in variant_names.iter().enumerate() {
+        let _ = write!(output, "        case {}: m_member._{}.~{}(); return;\n", index, index, &name);
+    }
+    output.push_str("        };\n    VERIFY_NOT_REACHED();\n    }\n");
+
+    // copy ctor / assign
+    let _ = write!(output, "    {}({} const& other) : m_member{{.invalid = 0}}, m_index(other.m_index) {{\n", &enum_.name, &enum_.name);
+    output.push_str("        switch (m_index) {\n");
+    for (index, name) in variant_names.iter().enumerate() {
+        let _ = write!(output, "        case {}: m_member._{} = other.m_member._{}; return;\n", index, index, index);
+    }
+    output.push_str("        };\n    VERIFY_NOT_REACHED();\n    }\n");
+
+    let _ = write!(output, "    {}& operator=({} const& other) {{\n", &enum_.name, &enum_.name);
+    output.push_str("        switch (m_index = other.m_index) {\n");
+    for (index, name) in variant_names.iter().enumerate() {
+        let _ = write!(output, "        case {}: m_member._{} = other.m_member._{}; return *this;\n", index, index, index);
+    }
+    output.push_str("        };\n    VERIFY_NOT_REACHED();\n    }\n");
+
+    // move ctor / assign
+    let _ = write!(output, "    {}({}&& other) : m_member{{.invalid = 0}}, m_index(other.m_index) {{\n", &enum_.name, &enum_.name);
+    output.push_str("        switch (m_index) {\n");
+    for (index, name) in variant_names.iter().enumerate() {
+        let _ = write!(output, "        case {}: m_member._{} = move(other.m_member._{}); return;\n", index, index, index);
+    }
+    output.push_str("        };\n    VERIFY_NOT_REACHED();\n    }\n");
+
+    let _ = write!(output, "    {}& operator=({}&& other) {{\n", &enum_.name, &enum_.name);
+    output.push_str("        switch (m_index = other.m_index) {\n");
+    for (index, name) in variant_names.iter().enumerate() {
+        let _ = write!(output, "        case {}: m_member._{} = move(other.m_member._{}); return *this;\n", index, index, index);
+    }
+    output.push_str("        };\n    VERIFY_NOT_REACHED();\n    }\n");
+
+    output.push_str("    template<typename T>\n");
+    output.push_str("    T& get() { return *bit_cast<T*>(&m_member); }\n");
+    output.push_str("    template<typename T>\n");
+    output.push_str("    T const& get() const { return *bit_cast<T const*>(&m_member); }\n");
+    output.push_str("    template<typename T>\n");
+    output.push_str("    bool has() const {\n");
+    output.push_str("        switch (m_index) {\n");
+    for (index, name) in variant_names.iter().enumerate() {
+        let _ = write!(output, "        case {}: return IsSame<T, {}>;\n", index, name);
+    }
+    output.push_str("        };\n    VERIFY_NOT_REACHED();\n");
+    output.push_str("    }\n");
+
+    if enum_.definition_type == DefinitionType::Class {
+        let mut fully_instantiated_name = enum_.name.clone();
+        if is_generic {
+            fully_instantiated_name.push('<');
+            fully_instantiated_name.push_str(generic_parameter_names.join(", ").as_str());
+            fully_instantiated_name.push('>');
+        }
+        output.push_str(
+            "    template<typename V, typename... Args> static auto create(Args&&... args) {\n",
+        );
+        output.push_str(format!("        return adopt_nonnull_ref_or_enomem(new (nothrow) {}(V(forward<Args>(args)...)));\n", fully_instantiated_name).as_str());
+        output.push_str("    }\n");
+    }
+
+
+    return output;
+}
+
 fn codegen_nonrecursive_enum(
     enum_: &CheckedEnum,
     project: &Project,
@@ -704,63 +860,7 @@ fn codegen_nonrecursive_enum(
     }
     output.push_str("}\n");
 
-    // Now define the variant itself.
-    if is_generic {
-        output.push_str("template<");
-        output.push_str(template_args.as_str());
-        output.push_str(">\n");
-    }
-    output.push_str("struct ");
-    output.push_str(&enum_.name);
-    output.push_str(" : public Variant<");
-    let mut variant_args = String::new();
-    let mut first = true;
-    let mut variant_names = Vec::new();
-    for variant in &enum_.variants {
-        if first {
-            first = false;
-        } else {
-            variant_args.push_str(", ");
-        }
-        match variant {
-            CheckedEnumVariant::StructLike(name, _, _)
-            | CheckedEnumVariant::Untyped(name, _)
-            | CheckedEnumVariant::Typed(name, _, _) => {
-                variant_args.push_str(&enum_.name);
-                variant_args.push_str("_Details::");
-                variant_args.push_str(name);
-                variant_names.push(name.clone());
-                if is_generic {
-                    variant_args.push('<');
-                    variant_args.push_str(generic_parameter_names.join(", ").as_str());
-                    variant_args.push('>');
-                }
-            }
-            _ => unreachable!(),
-        }
-    }
-
-    output.push_str(&variant_args);
-    output.push_str("> {\n");
-
-    output.push_str("    using Variant<");
-    output.push_str(&variant_args);
-    output.push_str(">::Variant;\n");
-
-    for name in &variant_names {
-        output.push_str("    using ");
-        output.push_str(name);
-        output.push_str(" = ");
-        output.push_str(&enum_.name);
-        output.push_str("_Details::");
-        output.push_str(name);
-        if is_generic {
-            output.push('<');
-            output.push_str(generic_parameter_names.join(", ").as_str());
-            output.push('>');
-        }
-        output.push_str(";\n");
-    }
+    output.push_str(&codegen_enum_definition_partial(enum_, project, context));
 
     output.push_str(&codegen_enum_debug_description_getter(enum_));
 
@@ -1129,89 +1229,8 @@ fn codegen_recursive_enum(
     }
     output.push_str("}\n");
 
-    // Now define the variant itself.
-    if is_generic {
-        output.push_str("template<");
-        output.push_str(template_args.as_str());
-        output.push_str(">\n");
-    }
-    output.push_str("struct ");
-    output.push_str(&enum_.name);
-    output.push_str(" : public Variant<");
-    let mut variant_args = String::new();
-    let mut first = true;
-    let mut variant_names = Vec::new();
-    for variant in &enum_.variants {
-        if first {
-            first = false;
-        } else {
-            variant_args.push_str(", ");
-        }
-        match variant {
-            CheckedEnumVariant::StructLike(name, _, _)
-            | CheckedEnumVariant::Untyped(name, _)
-            | CheckedEnumVariant::Typed(name, _, _) => {
-                variant_args.push_str(&enum_.name);
-                variant_args.push_str("_Details::");
-                variant_args.push_str(name);
-                variant_names.push(name.clone());
-                if is_generic {
-                    variant_args.push('<');
-                    variant_args.push_str(generic_parameter_names.join(", ").as_str());
-                    variant_args.push('>');
-                }
-            }
-            _ => unreachable!(),
-        }
-    }
-
-    output.push_str(&variant_args);
-    output.push_str("> ");
-    if enum_.definition_type == DefinitionType::Class {
-        output.push_str(", public RefCounted<");
-        output.push_str(&enum_.name);
-        if is_generic {
-            output.push('<');
-            output.push_str(generic_parameter_names.join(", ").as_str());
-            output.push('>');
-        }
-        output.push('>');
-    }
-    output.push_str(" {\n");
-
-    output.push_str("    using Variant<");
-    output.push_str(&variant_args);
-    output.push_str(">::Variant;\n");
-
-    for name in &variant_names {
-        output.push_str("    using ");
-        output.push_str(name);
-        output.push_str(" = ");
-        output.push_str(&enum_.name);
-        output.push_str("_Details::");
-        output.push_str(name);
-        if is_generic {
-            output.push('<');
-            output.push_str(generic_parameter_names.join(", ").as_str());
-            output.push('>');
-        }
-        output.push_str(";\n");
-    }
-
-    if enum_.definition_type == DefinitionType::Class {
-        let mut fully_instantiated_name = enum_.name.clone();
-        if is_generic {
-            fully_instantiated_name.push('<');
-            fully_instantiated_name.push_str(generic_parameter_names.join(", ").as_str());
-            fully_instantiated_name.push('>');
-        }
-        output.push_str(
-            "    template<typename V, typename... Args> static auto create(Args&&... args) {\n",
-        );
-        output.push_str(format!("        return adopt_nonnull_ref_or_enomem(new (nothrow) {}(V(forward<Args>(args)...)));\n", fully_instantiated_name).as_str());
-        output.push_str("    }\n");
-    }
-
+    
+    output.push_str(&codegen_enum_definition_partial(enum_, project, context));
     output.push_str(&codegen_enum_debug_description_getter(enum_));
 
     let scope = project.get_scope(enum_.scope_id);
@@ -1294,7 +1313,7 @@ fn codegen_enum_debug_description_getter(enum_: &CheckedEnum) -> String {
 
     output.push_str("auto builder = TRY(StringBuilder::create());");
 
-    output.push_str("TRY(this->visit(");
+    output.push_str("switch (this->index()) {\n");
 
     for (i, variant) in enum_.variants.iter().enumerate() {
         let name = match variant {
@@ -1305,8 +1324,8 @@ fn codegen_enum_debug_description_getter(enum_: &CheckedEnum) -> String {
         };
         let _ = writeln!(
             output,
-            "[&]([[maybe_unused]] {} const& that) -> ErrorOr<void> {{",
-            name
+            "case {}: TRY([&]([[maybe_unused]] auto const& that) -> ErrorOr<void> {{",
+            i
         );
         let _ = write!(output, "TRY(builder.append(\"{}::{}\"));", enum_.name, name);
         match variant {
@@ -1347,13 +1366,11 @@ fn codegen_enum_debug_description_getter(enum_: &CheckedEnum) -> String {
             }
             _ => {}
         }
-        output.push_str("return {}; }");
-        if i != enum_.variants.len() - 1 {
-            output.push(',');
-        }
+        let _ = write!(output, "return {{}}; }}(this->get<{}>()));", name);
+        output.push_str("break;\n");
     }
 
-    output.push_str("));");
+    output.push_str("}\n");
     output.push_str("return builder.to_string();");
     output.push_str(" }");
 

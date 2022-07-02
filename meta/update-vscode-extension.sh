@@ -31,10 +31,6 @@ then
     code --uninstall-extension JT.jakt
 fi
 
-# build and install the new version of the compiler
-echo "Building and installing most recent version of jakt compiler"
-cargo install --path .
-
 # build new vsix
 cd ./editors/vscode || error_and_exit "Failed to navigate to vscode directory"
 npx vsce package
