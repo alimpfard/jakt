@@ -157,8 +157,6 @@ template Optional<u16> convert_to_uint(StringView str, TrimWhitespace);
 template Optional<u32> convert_to_uint(StringView str, TrimWhitespace);
 template Optional<unsigned long> convert_to_uint(StringView str, TrimWhitespace);
 template Optional<unsigned long long> convert_to_uint(StringView str, TrimWhitespace);
-template Optional<long> convert_to_uint(StringView str, TrimWhitespace);
-template Optional<long long> convert_to_uint(StringView str, TrimWhitespace);
 
 template<typename T>
 Optional<T> convert_to_uint_from_hex(StringView str, TrimWhitespace trim_whitespace)
@@ -404,6 +402,17 @@ Optional<size_t> find_last(StringView haystack, char needle)
         if (haystack[i - 1] == needle)
             return i - 1;
     }
+    return {};
+}
+
+Optional<size_t> find_last(StringView haystack, StringView needle)
+{
+    for (size_t i = haystack.length(); i > 0; --i) {
+        auto value = StringUtils::find(haystack, needle, i - 1);
+        if (value.has_value())
+            return value;
+    }
+
     return {};
 }
 
