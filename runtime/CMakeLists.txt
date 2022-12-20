@@ -27,6 +27,11 @@ endif()
 file(REMOVE_RECURSE ${CMAKE_CURRENT_SOURCE_DIR}/AK)
 file(COPY ${serenity_SOURCE_DIR}/AK DESTINATION ${CMAKE_CURRENT_SOURCE_DIR})
 
+if (WITH_LIBLINE)
+    file(REMOVE_RECURSE ${CMAKE_CURRENT_SOURCE_DIR}/Userland)
+    file(COPY ${serenity_SOURCE_DIR}/Userland DESTINATION ${CMAKE_CURRENT_SOURCE_DIR})
+endif()
+
 configure_file("AK/Debug.h.in" "${CMAKE_CURRENT_SOURCE_DIR}/AK/Debug.h")
 
 set(JAKT_AK_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR} CACHE INTERNAL "jakt_ak_source_dir")
@@ -53,8 +58,6 @@ set(IMPORTED_AK_SOURCES
     ${JAKT_AK_SOURCE_DIR}/AK/StringImpl.cpp
     ${JAKT_AK_SOURCE_DIR}/AK/StringUtils.cpp
     ${JAKT_AK_SOURCE_DIR}/AK/StringView.cpp
-    # Note: Does not build on windows right now, but not needed by the runtime anyway.
-    # ${JAKT_AK_SOURCE_DIR}/AK/Time.cpp
     ${JAKT_AK_SOURCE_DIR}/AK/URL.cpp
     ${JAKT_AK_SOURCE_DIR}/AK/URLParser.cpp
     ${JAKT_AK_SOURCE_DIR}/AK/UUID.cpp
@@ -62,6 +65,13 @@ set(IMPORTED_AK_SOURCES
     ${JAKT_AK_SOURCE_DIR}/AK/Utf8View.cpp
     ${JAKT_AK_SOURCE_DIR}/AK/kmalloc.cpp
 )
+
+if (WITH_LIBLINE)
+    list(APPEND IMPORTED_AK_SOURCES
+        # Note: Does not build on windows right now, but not needed by the runtime anyway.
+        ${JAKT_AK_SOURCE_DIR}/AK/Time.cpp
+    )
+endif()
 
 set(RUNTIME_SOURCES
     ${IMPORTED_AK_SOURCES}

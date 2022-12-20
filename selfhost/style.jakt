@@ -1,0 +1,138 @@
+import lexer { Token }
+import utility { Span }
+
+enum Color {
+    light: bool = false
+
+    Green
+    Blue
+    Purple
+    Red
+    White
+}
+
+struct Style {
+    foreground: Color? = None
+    background: Color? = None
+}
+
+function style_for(anon token: Token) -> Style? => match token {
+    SingleQuotedString
+    | SingleQuotedByteString
+    | QuotedString => Style(foreground: Color::Green(light: true))
+
+    Number => Style(foreground: Color::Green)
+
+    Identifier
+    | LParen
+    | RParen
+    | LCurly
+    | RCurly
+    | LSquare
+    | RSquare
+    | Eol
+    | Eof
+    => None
+
+    Semicolon
+    | Colon
+    | ColonColon
+    | PercentSign
+    | Plus
+    | Minus
+    | Equal
+    | PlusEqual
+    | PlusPlus
+    | MinusEqual
+    | MinusMinus
+    | AsteriskEqual
+    | ForwardSlashEqual
+    | PercentSignEqual
+    | NotEqual
+    | DoubleEqual
+    | GreaterThan
+    | GreaterThanOrEqual
+    | LessThan
+    | LessThanOrEqual
+    | LeftArithmeticShift
+    | LeftShift
+    | LeftShiftEqual
+    | RightShift
+    | RightArithmeticShift
+    | RightShiftEqual
+    | Asterisk
+    | Ampersand
+    | AmpersandEqual
+    | AmpersandAmpersand
+    | Pipe
+    | PipeEqual
+    | PipePipe
+    | Caret
+    | CaretEqual
+    | Dollar
+    | Tilde
+    | ForwardSlash
+    | ExclamationPoint
+    | QuestionMark
+    | QuestionMarkQuestionMark
+    | QuestionMarkQuestionMarkEqual
+    | Comma
+    | Dot
+    | DotDot
+    | FatArrow
+    | Arrow
+    => Style(foreground: Color::Purple(light: true))
+
+    And
+    | Anon
+    | As
+    | Boxed
+    | Break
+    | Catch
+    | Class
+    | Continue
+    | Cpp
+    | Defer
+    | Else
+    | Enum
+    | Extern
+    | False
+    | For
+    | Function
+    | Comptime
+    | If
+    | Import
+    | In
+    | Is
+    | Let
+    | Loop
+    | Match
+    | Mut
+    | Namespace
+    | Not
+    | Or
+    | Override
+    | Private
+    | Public
+    | Raw
+    | Return
+    | Restricted
+    | Struct
+    | This
+    | Throw
+    | Throws
+    | True
+    | Try
+    | Unsafe
+    | Virtual
+    | Weak
+    | While
+    | Yield
+    | Guard
+    | Implements
+    | Requires
+    | Trait
+    => Style(foreground: Color::Blue)
+
+    Garbage => None
+}

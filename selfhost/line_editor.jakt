@@ -1,0 +1,71 @@
+import utility { allocate, null }
+import jakt::libc::io { fopen, fclose, fgets, FILE }
+import style { Style, Color }
+import utility { Span }
+
+enum LineResult {
+    Line(String)
+    Eof
+}
+
+class Handler {
+    public handler: function(editor: &mut Editor) throws -> void
+}
+
+struct Editor {
+    standard_input_file: raw FILE
+    line_pointer: raw c_char
+    prompt: String
+
+    function create(prompt: String) throws -> Editor {
+        mut std_in = fopen(pathname: "/dev/stdin".c_string(), mode: "r".c_string())
+        if std_in == null<FILE>() {
+            eprintln("Could not open /dev/stdin for reading")
+            throw Error::from_errno(42)
+        }
+
+        let editor = Editor(
+            standard_input_file: std_in
+            line_pointer: allocate<c_char>(count: 4096)
+            prompt
+        )
+        return editor
+    }
+
+    function set_display_refresh_handler(mut this, anon handler: Handler) throws { }
+
+    function active_buffer(this) throws -> String {
+        throw Error::from_string_literal("Invalid operation for this editor")
+    }
+
+    function stylize(mut this, anon span: Span, anon style: Style) { }
+
+    function get_line(mut this) throws -> LineResult {
+        eprint("{}", .prompt)
+
+        mut builder = StringBuilder::create()
+        unsafe {
+            let c_string = fgets(
+                s: .line_pointer
+                n: 4096
+                stream: .standard_input_file)
+
+            if c_string == null<c_char>() {
+                return LineResult::Eof
+            }
+
+            builder.append_c_string(c_string)
+        }
+
+        return LineResult::Line(builder.to_string())
+    }
+
+    function destroy(mut this) {
+        fclose(stream: .standard_input_file)
+        unsafe {
+            cpp {
+                "free(line_pointer);"
+            }
+        }
+    }
+}

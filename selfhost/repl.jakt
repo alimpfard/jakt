@@ -5,67 +5,17 @@ import typechecker {
 import compiler { Compiler, FileId }
 import lexer { Lexer }
 import parser { Parser }
-import utility { Span, allocate, null }
+import utility { Span, match_comptime_switch }
 import error { JaktError }
 import interpreter { value_to_checked_expression }
 import jakt::path { Path }
-
-import jakt::libc::io { fopen, fclose, fgets, FILE }
-
-enum LineResult {
-    Line(String)
-    Eof
-}
-
-struct Editor {
-    standard_input_file: raw FILE
-    line_pointer: raw c_char
-    prompt: String
-
-    function create(prompt: String) throws -> Editor {
-        mut std_in = fopen(pathname: "/dev/stdin".c_string(), mode: "r".c_string())
-        if std_in == null<FILE>() {
-            eprintln("Could not open /dev/stdin for reading")
-            throw Error::from_errno(42)
-        }
-
-        let editor = Editor(
-            standard_input_file: std_in
-            line_pointer: allocate<c_char>(count: 4096)
-            prompt
-        )
-        return editor
-    }
-
-    function get_line(mut this) throws -> LineResult {
-        eprint("{}", .prompt)
-
-        mut builder = StringBuilder::create()
-        unsafe {
-            let c_string = fgets(
-                s: .line_pointer
-                n: 4096
-                stream: .standard_input_file)
-
-            if c_string == null<c_char>() {
-                return LineResult::Eof
-            }
-
-            builder.append_c_string(c_string)
-        }
-
-        return LineResult::Line(builder.to_string())
-    }
-
-    function destroy(mut this) {
-        fclose(stream: .standard_input_file)
-        unsafe {
-            cpp {
-                "free(line_pointer);"
-            }
-        }
-    }
-}
+import style { style_for }
+import match_comptime_switch(
+    "use.libline"
+    if_true: "libline_line_editor"
+    if_false: "line_editor"
+    option_default: false
+) { Editor, Handler }
 
 function serialize_unary_operation(anon op: CheckedUnaryOperator, anon expr: String) -> String => match op {
     PreIncrement => "++" + expr
@@ -170,7 +120,7 @@ function serialize_ast_node(anon node: CheckedExpression) throws -> String => ma
     }
     IndexedExpression(expr, index) => format("{}[{}]", serialize_ast_node(expr), serialize_ast_node(index))
     IndexedDictionary(expr, index) => format("{}[{}]", serialize_ast_node(expr), serialize_ast_node(index))
-    IndexedTuple(expr, index) 
+    IndexedTuple(expr, index)
     | IndexedStruct(expr, index) => format("{}.{}", serialize_ast_node(expr), index)
     NamespacedVar(namespaces, var) => {
         mut builder = StringBuilder::create()
@@ -301,6 +251,35 @@ struct REPL {
         mut editor = Editor::create(prompt: "> ")
         defer editor.destroy()
 
+        editor.set_display_refresh_handler(Handler(
+            handler: function[this](editor: &mut Editor) throws -> void {
+                let line = editor.active_buffer()
+
+                mut pos: usize = 0
+                mut bytes_: [u8] = []
+                bytes_.ensure_capacity(line.length())
+                while pos < line.length() {
+                    bytes_.push(line.byte_at(pos))
+                    ++pos
+                }
+
+                .compiler.current_file = .file_id
+                .compiler.current_file_contents = bytes_
+
+                for token in Lexer::lex(compiler: .compiler) {
+                    let style = style_for(token)
+                    if style.has_value() {
+                        editor.stylize(token.span(), style!)
+                    }
+                }
+
+                let arr: [JaktError] = []
+                .compiler.errors = arr
+
+                return
+            }
+        ))
+
         loop {
             if not .compiler.errors.is_empty() {
                 .compiler.print_errors()
@@ -324,7 +303,7 @@ struct REPL {
             mut bytes_: [u8] = []
             bytes_.ensure_capacity(line.length())
             while pos < line.length() {
-                bytes_.push(line.byte_at(pos)) 
+                bytes_.push(line.byte_at(pos))
                 ++pos
             }
 

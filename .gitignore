@@ -12,4 +12,5 @@ CMakeFiles/
 
 # Populated by CMake, don't commit.
 runtime/AK
+runtime/Userland
 

@@ -16,13 +16,16 @@ endif()
 include(GNUInstallDirs)
 
 set(NO_SYMLINKS_DEFAULT OFF)
+set(WITH_LIBLINE_DEFAULT OFF) # To enable, set to ON and replace 'import line_editor' in repl.jakt with 'import libline_line_editor'.
 if (CMAKE_HOST_WIN32)
   set(NO_SYMLINKS_DEFAULT ON)
+  set(WITH_LIBLINE_DEFAULT OFF)
 endif()
 
 set(FINAL_STAGE "1" CACHE STRING "Compiler stage to stop at, either 1 (default) or 2)")
 option(NO_SYMLINKS "Use hard links instead of symlinks. Useful for unprivileged Windows users" "${NO_SYMLINKS_DEFAULT}")
 option(SERENITY_SOURCE_DIR PATH "Path of an existing SerenityOS checkout to pull AK files from")
+option(WITH_LIBLINE "Use LibLine for the repl instead of a basic getline()-based line input" "${WITH_LIBLINE_DEFAULT}")
 
 if (NO_SYMLINKS)
   set(LINK_COMMAND create_hardlink)
@@ -85,10 +88,17 @@ set(SELFHOST_SOURCES
   selfhost/parser.jakt
   selfhost/project.jakt
   selfhost/repl.jakt
+  selfhost/style.jakt
   selfhost/typechecker.jakt
   selfhost/types.jakt
   selfhost/utility.jakt
 )
+
+if(WITH_LIBLINE)
+  list(APPEND SELFHOST_SOURCES selfhost/libline_line_editor.jakt)
+else()
+  list(APPEND SELFHOST_SOURCES selfhost/line_editor.jakt)
+endif()
 
 # FIXME: STDLIB target needed
 set(SELFHOST_STDLIB_SOURCES
@@ -128,13 +138,48 @@ else()
   )
 endif()
 
+list(APPEND LIBLINE_SWITCH)
+if (WITH_LIBLINE)
+    list(APPEND LIBLINE_SWITCH use.libline=true)
+endif()
+
 add_jakt_executable(jakt_stage1
   COMPILER jakt_stage0
   MAIN_SOURCE selfhost/main.jakt
   MODULE_SOURCES ${SELFHOST_SOURCES}
   STDLIB_SOURCES ${SELFHOST_STDLIB_SOURCES}
   RUNTIME_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/runtime"
+  DEFINES ${LIBLINE_SWITCH}
 )
+
+if(WITH_LIBLINE)
+    set(AK_CPP_SOURCES
+        ${JAKT_AK_SOURCE_DIR}/Userland/Libraries/LibLine/InternalFunctions.cpp
+        ${JAKT_AK_SOURCE_DIR}/Userland/Libraries/LibLine/Editor.cpp
+        ${JAKT_AK_SOURCE_DIR}/Userland/Libraries/LibLine/KeyCallbackMachine.cpp
+        ${JAKT_AK_SOURCE_DIR}/Userland/Libraries/LibLine/SuggestionManager.cpp
+        ${JAKT_AK_SOURCE_DIR}/Userland/Libraries/LibLine/XtermSuggestionDisplay.cpp
+        ${JAKT_AK_SOURCE_DIR}/Userland/Libraries/LibCore/Object.cpp
+        ${JAKT_AK_SOURCE_DIR}/Userland/Libraries/LibCore/Event.cpp
+        ${JAKT_AK_SOURCE_DIR}/Userland/Libraries/LibCore/EventLoop.cpp
+        ${JAKT_AK_SOURCE_DIR}/Userland/Libraries/LibCore/IODevice.cpp
+        ${JAKT_AK_SOURCE_DIR}/Userland/Libraries/LibCore/Property.cpp
+        ${JAKT_AK_SOURCE_DIR}/Userland/Libraries/LibCore/ConfigFile.cpp
+        ${JAKT_AK_SOURCE_DIR}/Userland/Libraries/LibCore/File.cpp
+        ${JAKT_AK_SOURCE_DIR}/Userland/Libraries/LibCore/Stream.cpp
+        ${JAKT_AK_SOURCE_DIR}/Userland/Libraries/LibCore/Notifier.cpp
+        ${JAKT_AK_SOURCE_DIR}/Userland/Libraries/LibCore/System.cpp
+        ${JAKT_AK_SOURCE_DIR}/Userland/Libraries/LibCore/Directory.cpp
+        ${JAKT_AK_SOURCE_DIR}/Userland/Libraries/LibCore/DirIterator.cpp
+        ${JAKT_AK_SOURCE_DIR}/Userland/Libraries/LibCore/StandardPaths.cpp
+    )
+
+    target_sources(jakt_stage1 PRIVATE ${AK_CPP_SOURCES})
+    target_include_directories(jakt_stage1
+      PRIVATE
+        ${JAKT_AK_SOURCE_DIR}/Userland/Libraries
+    )
+endif()
 
 target_include_directories(jakt_stage1
   INTERFACE
@@ -144,6 +189,7 @@ target_include_directories(jakt_stage1
 )
 add_executable(Jakt::jakt_stage1 ALIAS jakt_stage1)
 apply_output_rules(jakt_stage1)
+target_compile_definitions(jakt_stage1 PRIVATE -DJAKT_USING_AK_AS_STANDARD_LIBRARY=1)
 
 if (FINAL_STAGE GREATER_EQUAL 2)
   add_jakt_executable(jakt_stage2

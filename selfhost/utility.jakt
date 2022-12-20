@@ -168,3 +168,18 @@ function is_ascii_binary(anon c: u8) => (c == b'0' or c == b'1')
 function is_ascii_alphanumeric(anon c: u8) -> bool => is_ascii_alpha(c) or is_ascii_digit(c)
 
 function is_whitespace(anon byte: u8) => byte == b' ' or byte == b'\t' or byte == b'\r'
+
+comptime match_comptime_switch(anon name: String, if_true: String, if_false: String, option_default: bool) -> String {
+    mut value = ___jakt_get_defined_option(name)
+    if not value.has_value() {
+        value = match option_default {
+            true => "true"
+            else => "false"
+        }
+    }
+
+    return match value.value() {
+        "true" => if_true
+        else => if_false
+    }
+}

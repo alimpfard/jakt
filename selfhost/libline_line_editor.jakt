@@ -1,0 +1,142 @@
+import utility { Span }
+import style { Style, Color }
+
+import extern "LibLine/Editor.h" {
+    namespace AK {
+        extern struct Result<T, E> {
+            function value(this) -> T
+            function error(this) -> E
+            function is_error(this) -> bool
+        }
+    }
+    namespace Line {
+        extern struct Span {
+            function Span(anon start: usize, anon end: usize) -> Span
+        }
+        namespace Style {
+            enum XtermColor : i32 {
+                Default = 9,
+                Black = 0,
+                Red,
+                Green,
+                Yellow,
+                Blue,
+                Magenta,
+                Cyan,
+                White,
+                Unchanged,
+            }
+            extern struct Foreground {
+                function Foreground(anon x: XtermColor) -> Foreground
+            }
+            extern struct Background {
+                function Background(anon x: XtermColor) -> Background
+            }
+        }
+        extern struct Style {
+            function Style() -> Style
+            function Style(anon property: Line::Style::Foreground) -> Style
+            function Style(anon property: Line::Style::Background) -> Style
+            function unify_with(mut this, anon other: &Line::Style) -> void
+            function to_deprecated_string(this) -> String
+        }
+        extern class Editor {
+            public function get_line(mut this, prompt: String) -> AK::Result<String, Line::Editor::Error>
+            public function initialize(mut this)
+            public function line(this) -> String
+            public function set_prompt(mut this, prompt: String)
+            public function clear_line(mut this)
+            public function stylize(mut this, span: Span, style: Style)
+            public function strip_styles(mut this)
+            public function add_to_history(mut this, line: String)
+
+            public on_display_refresh: function(editor: &mut Editor) -> void
+        }
+        namespace Editor {
+            enum Error: i32 {
+                ReadFailure
+                Empty
+                Eof
+            }
+            extern function construct() -> Editor
+        }
+    }
+}
+
+enum LineResult {
+    Line(String)
+    Eof
+}
+
+class Handler {
+    public handler: function(editor: &mut Editor) throws -> void
+}
+
+struct Editor {
+    editor: Line::Editor
+    prompt: String
+
+    function create(
+        prompt: String
+    ) throws -> Editor {
+        mut editor = Line::Editor::construct()
+        editor.initialize()
+
+        return Editor(
+            editor
+            prompt
+        )
+    }
+
+    function set_display_refresh_handler(mut this, anon handler: Handler) throws {
+        // FIXME: Can't mention `Line::Editor` as a raw type here.
+        unsafe { cpp { "
+            editor->on_display_refresh = [handler = move(handler), this](Line::Editor& e) {
+                e.strip_styles();
+                (void)handler->handler(*this);
+            };
+        " } }
+    }
+
+    private function convert(anon c: Color) -> Line::Style::XtermColor {
+        return match c {
+            Green => Line::Style::XtermColor::Green
+            Blue => Line::Style::XtermColor::Blue
+            Purple => Line::Style::XtermColor::Magenta
+            Red => Line::Style::XtermColor::Red
+            White => Line::Style::XtermColor::White
+        }
+    }
+
+    function stylize(mut this, anon span: Span, anon style: Style) {
+        mut line_style = Line::Style()
+        if style.foreground.has_value() {
+            line_style.unify_with(&Line::Style(Line::Style::Foreground(convert(style.foreground!))))
+        }
+        if style.background.has_value() {
+            line_style.unify_with(&Line::Style(Line::Style::Background(convert(style.background!))))
+        }
+
+        .editor.stylize(
+            span: Line::Span(start: span.start, end: span.end)
+            style: line_style
+        )
+    }
+
+    function active_buffer(this) -> String {
+        return .editor.line()
+    }
+
+    function get_line(mut this) throws -> LineResult {
+        mut result = .editor.get_line(prompt: .prompt)
+        if result.is_error() {
+            return LineResult::Eof
+        }
+
+        .editor.add_to_history(line: result.value())
+
+        return LineResult::Line(result.value())
+    }
+
+    function destroy(mut this) { }
+}

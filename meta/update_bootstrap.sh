@@ -22,6 +22,9 @@ cp -r runtime bootstrap/temp/
 cp selfhost_build/*.cpp bootstrap/temp
 cp selfhost_build/*.h bootstrap/temp
 
+# Don't copy Userland, even if it exsits.
+rm -fr bootstrap/temp/runtime/Userland
+
 # Great, now replace the old one with the new one
 rm -fr bootstrap/stage0
 mv bootstrap/temp bootstrap/stage0
