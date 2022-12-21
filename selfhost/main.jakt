@@ -206,6 +206,22 @@ function main(args: [String]) {
     let print_symbols = args_parser.flag(["--print-symbols"])
     let project_name = args_parser.option(["--create"])
 
+    let define_values = args_parser.option_multiple(["--define"])
+    mut defines: [String:String] = [:]
+    for value in define_values {
+        let parts = value.split('=')
+        if parts.size() == 1 {
+            eprintln("error: invalid define value: {}, expected `--define key=value`", value)
+            return 1
+        }
+
+        if parts.size() == 2 {
+            defines[parts[0]] = parts[1]
+        } else {
+            defines[parts[1]] = join(parts[2..].to_array(), separator: "=")
+        }
+    }
+
     let interpret_run = args_parser.flag(["-r", "--run"])
 
     let format = args_parser.flag(["-f", "--format"])
@@ -221,7 +237,11 @@ function main(args: [String]) {
     } as! usize
 
     if args_parser.flag(["--repl"]) {
-        mut repl = REPL::create(runtime_path: Path::from_parts([runtime_path, "jaktlib"]), target_triple)
+        mut repl = REPL::create(
+            runtime_path: Path::from_parts([runtime_path, "jaktlib"])
+            target_triple
+            defines
+        )
         repl.run()
         return 0
     }
@@ -302,6 +322,7 @@ function main(args: [String]) {
         dump_try_hints
         optimize
         target_triple
+        defines
     )
 
     compiler.load_prelude()

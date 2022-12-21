@@ -919,6 +919,31 @@ class Interpreter {
                     impl: ValueImpl::JaktString(.compiler.target_triple ?? ___jakt_get_target_triple_string())
                     span: call_span
                 ))
+                "___jakt_get_defined_option_impl" => {
+                    let name = match arguments[0].impl {
+                        JaktString(x) => x
+                        else => {
+                            .error(format("Expected a string argument to ___jakt_get_defined_option_impl, but got {}", arguments[0].impl), call_span)
+                            throw Error::from_errno(InterpretError::InvalidType as! i32)
+                        }
+                    }
+
+                    let value = .compiler.defines.get(name)
+                    // -> Optional<String>
+                    yield match value.has_value() {
+                        true => StatementResult::JustValue(Value(
+                            impl: ValueImpl::OptionalSome(value: Value(
+                                impl: ValueImpl::JaktString(value!)
+                                span: call_span
+                            ))
+                            span: call_span
+                        ))
+                        else => StatementResult::JustValue(Value(
+                            impl: ValueImpl::OptionalNone
+                            span: call_span
+                        ))
+                    }
+                }
                 "abort" => {abort()}
                 "Set" => {
                     if type_bindings.size() != 1 {
