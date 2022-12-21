@@ -1,0 +1,12 @@
+/// Expect:
+/// - output: "foo\n"
+
+import foo() { Path }
+
+comptime foo() => "jakt::path"
+
+function main() {
+    let path = Path::from_string("foo.txt")
+    println("{}", path.basename(strip_extension: true))
+}
+

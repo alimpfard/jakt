@@ -148,6 +148,7 @@ struct Typechecker {
                 import_list: ImportList::All
             )
             scope_id: root_scope_id
+            comptime_pass: None
         )
 
         typechecker.typecheck_module(parsed_namespace, scope_id: root_scope_id)
@@ -699,7 +700,7 @@ struct Typechecker {
         .program.find_struct_in_scope(scope_id, name)
 
     function typecheck_module(mut this, parsed_namespace: ParsedNamespace, scope_id: ScopeId) throws {
-        .typecheck_namespace_imports(parsed_namespace, scope_id)
+        .typecheck_namespace_imports(parsed_namespace, scope_id, comptime_pass: false)
         .typecheck_namespace_predecl(parsed_namespace, scope_id)
         .typecheck_namespace_aliases(parsed_namespace, scope_id, allow: ImportRestrictions(structs: true, enums: true, types: true, traits: true, namespaces: true))
         .typecheck_namespace_fields(parsed_namespace, scope_id)
@@ -708,6 +709,7 @@ struct Typechecker {
         .typecheck_namespace_aliases(parsed_namespace, scope_id, allow: ImportRestrictions(functions: true))
         .typecheck_namespace_default_fields(parsed_namespace, scope_id)
         .typecheck_namespace_comptime_entities(parsed_namespace, scope_id)
+        .typecheck_namespace_imports(parsed_namespace, scope_id, comptime_pass: true)
         .typecheck_namespace_declarations(parsed_namespace, scope_id)
     }
 
@@ -872,7 +874,14 @@ struct Typechecker {
         }
     }
 
-    function typecheck_module_import(mut this, anon import_: ParsedModuleImport, scope_id: ScopeId) throws {
+    function typecheck_module_import(mut this, anon import_: ParsedModuleImport, scope_id: ScopeId, comptime_pass: bool?) throws {
+        if comptime_pass.has_value() and match comptime_pass! {
+            true => not import_.module_name is Comptime
+            else =>import_.module_name is Comptime
+        } {
+            return
+        }
+
         // load the module if not present
         // FIXME: use match
         let module_names_and_spans = match import_.module_name {
@@ -1274,9 +1283,9 @@ struct Typechecker {
         }
     }
 
-    function typecheck_namespace_imports(mut this, parsed_namespace: ParsedNamespace, scope_id: ScopeId) throws {
+    function typecheck_namespace_imports(mut this, parsed_namespace: ParsedNamespace, scope_id: ScopeId, comptime_pass: bool) throws {
         for module_import in parsed_namespace.module_imports {
-            .typecheck_module_import(module_import, scope_id)
+            .typecheck_module_import(module_import, scope_id, comptime_pass)
         }
 
         for extern_import in parsed_namespace.extern_imports {
