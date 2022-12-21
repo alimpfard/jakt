@@ -1090,14 +1090,6 @@ class Interpreter {
                         impl: ValueImpl::JaktString(path.to_string())
                         span: call_span
                     )
-                    if not path.exists() {
-                        // FIXME: This should `return StatementResult::Throw(...)`, but we currently can't put strings in Error, so the output result looks vague and unhelpful.
-                        .error(
-                            format("Prelude function `File::{}` could not find file at path {}", prelude_function, path.to_string()),
-                            call_span
-                        )
-                        throw Error::from_errno(InterpretError::InvalidType as! i32)
-                    }
                     let file_struct_id = .program.find_struct_in_prelude("File")
                     let file_struct = .program.get_struct(file_struct_id)
                     let scope = .program.get_scope(file_struct.scope_id)
