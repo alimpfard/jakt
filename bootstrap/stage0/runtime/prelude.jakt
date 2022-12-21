@@ -166,6 +166,9 @@ extern class File {
 
 extern function ___jakt_get_target_triple_string() throws -> String
 
+extern function ___jakt_get_defined_option_impl(anon name: String) -> String?
+comptime ___jakt_get_defined_option(name: String) -> String? => ___jakt_get_defined_option_impl(name)
+
 extern function abort() -> never
 extern function as_saturated<U, T>(anon input: T) -> U
 extern function as_truncated<U, T>(anon input: T) -> U
