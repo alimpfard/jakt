@@ -707,7 +707,25 @@ struct Typechecker {
         .typecheck_namespace_function_predecl(parsed_namespace, scope_id)
         .typecheck_namespace_aliases(parsed_namespace, scope_id, allow: ImportRestrictions(functions: true))
         .typecheck_namespace_default_fields(parsed_namespace, scope_id)
+        .typecheck_namespace_comptime_entities(parsed_namespace, scope_id)
         .typecheck_namespace_declarations(parsed_namespace, scope_id)
+    }
+
+    function typecheck_namespace_comptime_entities(mut this, parsed_namespace: ParsedNamespace, scope_id: ScopeId) throws {
+        let children = .get_scope(id: scope_id).children
+        for i in 0..parsed_namespace.namespaces.size() {
+            let child_namespace = parsed_namespace.namespaces[i]
+            let child_namespace_scope_id = children[i]
+            .typecheck_namespace_comptime_entities(parsed_namespace: child_namespace, scope_id: child_namespace_scope_id)
+        }
+
+        for fun in parsed_namespace.functions.iterator() {
+            if not fun.is_comptime {
+                continue
+            }
+
+            .typecheck_function(parsed_function: fun, parent_scope_id: scope_id)
+        }
     }
 
     function typecheck_visibility(mut this, visibility: Visibility, scope_id: ScopeId) throws -> CheckedVisibility {
@@ -2613,6 +2631,9 @@ struct Typechecker {
         }
 
         for fun in parsed_namespace.functions.iterator() {
+            if fun.is_comptime {
+                continue
+            }
             .typecheck_function(parsed_function: fun, parent_scope_id: scope_id)
         }
 
