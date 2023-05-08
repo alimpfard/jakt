@@ -345,6 +345,13 @@ enum RecordType {
         Garbage => "<garbage record type>"
     }
 }
+
+struct ParsedRecordNamespaceContents {
+    records: [ParsedRecord]
+    traits: [ParsedTrait]
+    aliases: [ParsedAlias]
+}
+
 struct ParsedRecord {
     name: String
     name_span: Span
@@ -354,6 +361,7 @@ struct ParsedRecord {
     implements_list: [ParsedNameWithGenericParameters]?
     methods: [ParsedMethod]
     record_type: RecordType
+    namespace_contents: ParsedRecordNamespaceContents
 
     external_name: ExternalName? = None
 }
@@ -2353,11 +2361,15 @@ struct Parser {
             return ParsedExternalTraitImplementation(for_type: type_name, traits: trait_list!, methods: [])
         }
 
-        let (fields, methods) = .parse_struct_class_body(
+        let (fields, methods, contents) = .parse_struct_class_body(
             definition_linkage: DefinitionLinkage::Internal
             default_visibility: Visibility::Public
             is_class: false
         )
+
+        if not (contents.records.is_empty() and contents.aliases.is_empty() and contents.traits.is_empty()) {
+            .error("External trait implementations cannot introduce new types, records or aliases", .current().span())
+        }
 
         if not fields.is_empty() {
             .error("External trait implementations cannot have fields", fields[0].var_decl.span)
@@ -2482,6 +2494,11 @@ struct Parser {
                 implements_list: None,
                 methods: [],
                 record_type: RecordType::Garbage
+                namespace_contents: ParsedRecordNamespaceContents(
+                    records: []
+                    traits: []
+                    aliases: []
+                )
             )
         }
     }
@@ -3123,6 +3140,11 @@ struct Parser {
             implements_list: None,
             methods: [],
             record_type: RecordType::Garbage
+            namespace_contents: ParsedRecordNamespaceContents(
+                records: []
+                traits: []
+                aliases: []
+            )
         )
         mut underlying_type: ParsedType? = None
         if .current() is Enum {
@@ -3204,7 +3226,7 @@ struct Parser {
         definition_linkage: DefinitionLinkage
         default_visibility: Visibility
         is_class: bool
-    ) throws -> ([ParsedField], [ParsedMethod]) {
+    ) throws -> ([ParsedField], [ParsedMethod], ParsedRecordNamespaceContents) {
         if .current() is LCurly {
             .index++
         } else {
@@ -3213,6 +3235,11 @@ struct Parser {
 
         mut fields: [ParsedField] = []
         mut methods: [ParsedMethod] = []
+        mut contents: ParsedRecordNamespaceContents = ParsedRecordNamespaceContents(
+            records: []
+            traits: []
+            aliases: []
+        )
 
         // This gets reset after each loop. If someone doesn't consume it, we error out.
         mut last_visibility: Visibility? = None
@@ -3238,7 +3265,7 @@ struct Parser {
                         .error("Expected function after attribute", token.span())
                     }
                     .index++
-                    return (fields, methods)
+                    return (fields, methods, contents)
                 }
                 Comma | Eol => {
                     // Treat comma as whitespace? Might require them in the future
@@ -3280,28 +3307,38 @@ struct Parser {
                         .index += 1
                     }
                 }
-                Identifier => {
-                    // Parse a field
-                    let visibility = last_visibility ?? default_visibility
-                    last_visibility = None
-                    last_visibility_span = None
-
-                    if last_virtual or last_override {
-                        .error("Fields cannot be ‘virtual’ or ‘override’", .current().span())
+                Identifier(name) => match name {
+                    "use" => {
+                        if not active_attributes.is_empty() {
+                            .error("Cannot apply attributes to use declarations", active_attributes[0].span)
+                            active_attributes = []
+                        }
+                        .index++
+                        contents.aliases.push(.parse_using())
                     }
-                    last_virtual = false
-                    last_override = false
+                    else => {
+                        // Parse a field
+                        let visibility = last_visibility ?? default_visibility
+                        last_visibility = None
+                        last_visibility_span = None
 
-                    if last_extern {
-                        .error("Fields cannot be ‘extern’", .current().span())
+                        if last_virtual or last_override {
+                            .error("Fields cannot be ‘virtual’ or ‘override’", .current().span())
+                        }
+                        last_virtual = false
+                        last_override = false
+
+                        if last_extern {
+                            .error("Fields cannot be ‘extern’", .current().span())
+                        }
+                        last_extern = false
+
+                        mut field = .parse_field(visibility)
+                        .apply_attributes(&mut field, &active_attributes)
+                        active_attributes = []
+
+                        fields.push(field)
                     }
-                    last_extern = false
-
-                    mut field = .parse_field(visibility)
-                    .apply_attributes(&mut field, &active_attributes)
-                    active_attributes = []
-
-                    fields.push(field)
                 }
                 Fn | Comptime | Destructor => {
                     // Parse a method
@@ -3352,6 +3389,46 @@ struct Parser {
                     last_override = true
                     .index++
                 }
+                Boxed | Enum => {
+                    mut is_boxed = .current() is Boxed
+                    if is_boxed {
+                        .index++
+                    }
+                    mut parsed_enum = .parse_enum(
+                        match last_extern or definition_linkage is External { true => DefinitionLinkage::External, false => DefinitionLinkage::Internal }
+                        is_boxed
+                    )
+                    .apply_attributes(&mut parsed_enum, &active_attributes)
+                    active_attributes = []
+                    last_extern = false
+                    contents.records.push(parsed_enum)
+                }
+                Struct => {
+                    mut parsed_struct = .parse_struct(
+                        match last_extern or definition_linkage is External { true => DefinitionLinkage::External, false => DefinitionLinkage::Internal }
+                    )
+                    .apply_attributes(&mut parsed_struct, &active_attributes)
+                    active_attributes = []
+                    last_extern = false
+                    contents.records.push(parsed_struct)
+                }
+                Class => {
+                    mut parsed_class = .parse_class(
+                        match last_extern or definition_linkage is External { true => DefinitionLinkage::External, false => DefinitionLinkage::Internal }
+                    )
+                    .apply_attributes(&mut parsed_class, &active_attributes)
+                    active_attributes = []
+                    last_extern = false
+                    contents.records.push(parsed_class)
+                }
+                Trait => {
+                    if not active_attributes.is_empty() {
+                        .error("Cannot apply attributes to trait declarations", active_attributes[0].span)
+                        active_attributes = []
+                    }
+                    .index++
+                    contents.traits.push(.parse_trait())
+                }
                 else => {
                     active_attributes = []
 
@@ -3370,7 +3447,7 @@ struct Parser {
         } else {
             .error("Incomplete struct body, expected ‘}’", .current().span())
         }
-        return (fields, methods)
+        return (fields, methods, contents)
     }
 
     public fn parse_struct(mut this, anon definition_linkage: DefinitionLinkage) throws -> ParsedRecord {
@@ -3382,6 +3459,11 @@ struct Parser {
             implements_list: None,
             methods: [],
             record_type: RecordType::Garbage
+            namespace_contents: ParsedRecordNamespaceContents(
+                records: []
+                traits: []
+                aliases: []
+            )
         )
         if .current() is Struct {
             .index++
@@ -3423,9 +3505,10 @@ struct Parser {
             return parsed_struct
         }
 
-        let (fields, methods) = .parse_struct_class_body(definition_linkage, default_visibility: Visibility::Public, is_class: false)
+        let (fields, methods, contents) = .parse_struct_class_body(definition_linkage, default_visibility: Visibility::Public, is_class: false)
 
         parsed_struct.methods = methods
+        parsed_struct.namespace_contents = contents
         let super_type: ParsedType? = None
         parsed_struct.record_type = RecordType::Struct(fields, super_type)
 
@@ -3441,6 +3524,11 @@ struct Parser {
             implements_list: None,
             methods: [],
             record_type: RecordType::Garbage
+            namespace_contents: ParsedRecordNamespaceContents(
+                records: []
+                traits: []
+                aliases: []
+            )
         )
         mut super_type: ParsedType? = None
         if .current() is Class {
@@ -3495,9 +3583,10 @@ struct Parser {
             return parsed_class
         }
 
-        let (fields, methods) = .parse_struct_class_body(definition_linkage, default_visibility: Visibility::Private, is_class: true)
+        let (fields, methods, contents) = .parse_struct_class_body(definition_linkage, default_visibility: Visibility::Private, is_class: true)
 
         parsed_class.methods = methods
+        parsed_class.namespace_contents = contents
         parsed_class.record_type = RecordType::Class(fields, super_type)
 
         return parsed_class

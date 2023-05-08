@@ -1012,7 +1012,6 @@ struct Typechecker {
 
         mut constructor = .get_function(constructor_id)
 
-
         mut index = 0uz
         for unchecked_member in parsed_fields {
             defer index += 1
@@ -1032,6 +1031,12 @@ struct Typechecker {
             )
 
             structure.fields[index].default_value = checked_def_value
+            if constructor.params.size() <= index {
+                eprintln("Constructor param out of bounds! {} (field {})", index, .get_variable(structure.fields[index].variable_id))
+                eprintln("Constructor's params = {:#}", constructor.params)
+                eprintln("Struct's fields = {:#}", structure.fields)
+            }
+
             constructor.set_param_default_value(
                 param_index: index
                 default_value: checked_def_value
@@ -3477,7 +3482,7 @@ struct Typechecker {
                         for field in common_fields {
                             fields.push(field)
                         }
-                        
+
                         if (variant.params is Some(variant_params) and variant.default_values is Some(variant_default_values)) {
                             for i in 0..variant_params.size() {
                                 let param = variant_params[i]
@@ -3504,7 +3509,7 @@ struct Typechecker {
                                     // FIXME: The typechecker can't find expressions that are outside the scope of the enum.
                                     // FIXME: Get the real safety mode from somewhere, right now it assumes it is safe.
                                     checked_default_value = .typecheck_expression(expression, scope_id: enum_.scope_id, safety_mode: SafetyMode::Safe, type_hint: type_id)
-                                } 
+                                }
 
                                 params.push(CheckedParameter(requires_label: true, variable: checked_var, default_value: checked_default_value))
 
