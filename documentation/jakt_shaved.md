@@ -4,11 +4,11 @@
 
 ```jakt
 // Comment to end of line
-import foo                  // Import foo.jakt
-import foo { bar }          // Selectively import bar from foo
-import foo as baz           // Imported foo becomes baz
-import extern c "myfile.h"  // Import C library from within search path
-import extern "vector"      // Import C++ module "vector"
+import foo                          // Import foo.jakt
+import foo { bar }                  // Selectively import bar from foo
+import foo as baz                   // Imported foo becomes baz
+import extern c "myfile.h" { ... }  // Import C library from within search path
+import extern "vector" { ... }      // Import C++ header "vector"
 ```
 
 ## Literals
@@ -22,13 +22,15 @@ import extern "vector"      // Import C++ module "vector"
 0.1, 42f32, 123_456.78f64   // Floating point numbers
 0b1000000, 0b1011           // Binary literals
 b'a'                        // Byte literal
+c'a'                        // C character literal
+'a'                         // Unicode code point literal
 true, false                 // Only valid boolean (bool) states
 ```
 
 ## Declarations
 
 ```jakt
-let foo = 10                // Immutable variable, default type
+let foo = 10                // Immutable variable, inferred type
 let foo:u8 = 255            // Immutable variable, type u8
 mut foo:i32 = 12345         // Mutable variable, type i32
 let b:bool = true           // Boolean variable (immutable), true or false
@@ -36,18 +38,18 @@ let x = [1, 2, 3]           // Array with 3 entries (immutable)
 let v = [85; 3]             // Array with 3 entries, initialized to 85 (immutable)
 mut x: [i32] = []           // Mutable empty array of type i32
 
-enum Apple { GrannySmith }  // Apple is a type with a value GrannySmith
-enum SimpleWithType {       // Enum values can have independent types
+enum Apple { GrannySmith }  // Apple is an enum type with a single constructor GrannySmith
+enum SimpleWithType {       // Enum constructors can have independent types
     A(i32)
-    B(u32)
+    B(x: u32, y: u32)
 }
-enum UnderlyingType: i32 {  // Enum types can be specified here
+enum UnderlyingType: i32 {  // Enums can be declared with an underlying numeric type
     Zero
     One = 1
     ItsAllMadeUp = 10
 }
 
-let food:Apple = Apple::GrannySmith     //Assign enum entry to variable
+let food: Apple = Apple::GrannySmith     // Assign enum value to variable
 ```
 
 ## Arrays
@@ -57,9 +59,9 @@ mut x: [i32] = [1,2,3]
 x[0]                                    // Arrays are zero indexed
 x.insert(before_index: 0, value: 0i32)  // Insert before .size or existing index
 for y in x {                            //
-    println("{}",y)                     // Auto iterate
-}                                       //
-x.push(10i32)                           // Add to end
+    println("{}",y)                     // Iteration using the iteration protocols
+}                                       //    Iterable<T> and IntoIterator<T>
+x.push(10i32)                           // Append to the end
 let v = x.pop()                         // Retrieve and remove last entry
 let q = x.contains(20i32)               // True/false search
 let z = x[2..4]                         // New slice array from x
@@ -69,11 +71,11 @@ let z = x[2..4]                         // New slice array from x
 
 ```jakt
 {                           
-    int x                  // Scope of x is from declaration to end of block
+    let x = 4                // Scope of x is from declaration to end of block
 }
-if (x) a                   // If x is true, evaluate a
-else if (y) b              // If not x and y (optional, may be repeated)
-else c                     // If not x and not y (optional)
+if x { a }                   // If x is true, evaluate a
+else if y { b }              // If not x and y (optional, may be repeated)
+else { c }                   // If not x and not y (optional)
 
 mut i = 0
 loop {                      // Easy loop
@@ -84,26 +86,27 @@ loop {                      // Easy loop
   i++
 }
 
-while (x) a {}                // Repeat 0 or more times while x is true
+while x { a }               // Repeat a 0 or more times while x is true
 
 
 {
-  defer { println("b") }    // Will not execute until leaving scope
+  defer { println("b") }    // Execute contents of block upon leaving the lexical scope
   println("a")
-}                           // Output is "ab"
+}                           // Output is "a\nb\n"
 
-break                      // Jump out of while, do, or for loop, or switch
-return x                   // Return x from function to caller
+break                       // Jump out of while, do, or for loop, or switch
+return x                    // Return x from function to caller
 ```
 
 ## Functions
 
 ```jakt
-fn f(x: i32, y: i32) -> i64       // f is a function taking 2 i32 and returning i64
-fn f()                   // f is a procedure taking no arguments
-fn f(a: i32=0)            // f() is equivalent to f(0)
+fn f(x: i32, y: i32) -> i64       // f is a function taking two i32s and returning an i64
+fn f()                            // f is a function taking no arguments
+fn f(a: i32 = 0)                  // f() is equivalent to f(a: 0)
 
-fn f() { statements }         // Function definition
+fn f() { statements }         // Function definition, as a block
+fn f() -> i32 => 42           // Function definition, short "arrow" form
 ```
 
 ## Expressions
