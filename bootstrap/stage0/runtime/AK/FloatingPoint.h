@@ -22,7 +22,7 @@ union FloatExtractor<f128> {
     static constexpr int exponent_bias = 16383;
     static constexpr int exponent_bits = 15;
     static constexpr unsigned exponent_max = 32767;
-    struct {
+    struct [[gnu::packed]] {
         unsigned __int128 mantissa : 112;
         unsigned exponent : 15;
         unsigned sign : 1;
@@ -30,8 +30,8 @@ union FloatExtractor<f128> {
     f128 d;
 };
 // Validate that f128 and the FloatExtractor union are 128 bits.
-static_assert(sizeof(f128) == 16);
-static_assert(sizeof(FloatExtractor<f128>) == 16);
+static_assert(AssertSize<f128, 16>());
+static_assert(AssertSize<FloatExtractor<f128>, sizeof(f128)>());
 #endif
 
 #ifdef AK_HAS_FLOAT_80
@@ -42,13 +42,14 @@ union FloatExtractor<f80> {
     static constexpr int exponent_bias = 16383;
     static constexpr int exponent_bits = 15;
     static constexpr unsigned exponent_max = 32767;
-    struct {
+    struct [[gnu::packed]] {
         unsigned long long mantissa;
-        unsigned exponent : 15;
-        unsigned sign : 1;
+        unsigned long long exponent : 15;
+        unsigned long long sign : 1;
     };
     f80 d;
 };
+static_assert(AssertSize<FloatExtractor<f80>, sizeof(f80)>());
 #endif
 
 template<>
@@ -58,13 +59,14 @@ union FloatExtractor<f64> {
     static constexpr int exponent_bias = 1023;
     static constexpr int exponent_bits = 11;
     static constexpr unsigned exponent_max = 2047;
-    struct {
+    struct [[gnu::packed]] {
         unsigned long long mantissa : 52;
-        unsigned exponent : 11;
-        unsigned sign : 1;
+        unsigned long long exponent : 11;
+        unsigned long long sign : 1;
     };
     f64 d;
 };
+static_assert(AssertSize<FloatExtractor<f64>, sizeof(f64)>());
 
 template<>
 union FloatExtractor<f32> {
@@ -73,13 +75,14 @@ union FloatExtractor<f32> {
     static constexpr int exponent_bias = 127;
     static constexpr int exponent_bits = 8;
     static constexpr unsigned exponent_max = 255;
-    struct {
-        unsigned long long mantissa : 23;
+    struct [[gnu::packed]] {
+        unsigned mantissa : 23;
         unsigned exponent : 8;
         unsigned sign : 1;
     };
     f32 d;
 };
+static_assert(AssertSize<FloatExtractor<f32>, sizeof(f32)>());
 
 template<size_t S, size_t E, size_t M>
 requires(S <= 1 && E >= 1 && M >= 1 && (S + E + M) <= 64) class FloatingPointBits final {
