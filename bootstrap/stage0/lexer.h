@@ -5,43 +5,7 @@
 #include "compiler.h"
 namespace Jakt {
 namespace lexer {
-struct Lexer {
-  public:
-public: size_t index;public: JaktInternal::DynamicArray<u8> input;public: NonnullRefPtr<compiler::Compiler> compiler;public: JaktInternal::Optional<JaktInternal::DynamicArray<u8>> comment_contents;public: JaktInternal::Set<DeprecatedString> illegal_cpp_keywords;public: ErrorOr<JaktInternal::Optional<DeprecatedString>> consume_comment_contents();
-public: ErrorOr<lexer::Token> lex_quoted_string(u8 const delimiter);
-public: ErrorOr<JaktInternal::Optional<lexer::Token>> next();
-public: ErrorOr<lexer::Token> lex_character_constant_or_name();
-public: lexer::Token lex_dot();
-public: lexer::Token lex_question_mark();
-public: ErrorOr<lexer::Token> lex_forward_slash();
-public: u8 peek_behind(size_t const steps) const;
-public: u8 peek_ahead(size_t const steps) const;
-public: lexer::Token lex_asterisk();
-public: lexer::Token lex_minus();
-public: u8 peek() const;
-public: lexer::Token lex_percent_sign();
-public: ErrorOr<lexer::Token> lex_number_or_name();
-public: lexer::Token lex_less_than();
-public: bool eof() const;
-public: Lexer(size_t a_index, JaktInternal::DynamicArray<u8> a_input, NonnullRefPtr<compiler::Compiler> a_compiler, JaktInternal::Optional<JaktInternal::DynamicArray<u8>> a_comment_contents, JaktInternal::Set<DeprecatedString> a_illegal_cpp_keywords);
-
-public: lexer::Token lex_ampersand();
-public: utility::Span span(size_t const start, size_t const end) const;
-public: lexer::Token lex_plus();
-public: lexer::Token lex_exclamation_point();
-public: ErrorOr<lexer::LiteralSuffix> consume_numeric_literal_suffix();
-public: lexer::Token lex_colon();
-public: bool valid_digit(lexer::LiteralPrefix const prefix, u8 const digit, bool const decimal_allowed);
-public: ErrorOr<void> error(DeprecatedString const message, utility::Span const span);
-public: lexer::Token lex_equals();
-public: ErrorOr<DeprecatedString> substring(size_t const start, size_t const length) const;
-public: lexer::Token lex_greater_than();
-public: lexer::Token lex_pipe();
-public: lexer::Token lex_caret();
-public: ErrorOr<lexer::Token> lex_number();
-public: static ErrorOr<JaktInternal::DynamicArray<lexer::Token>> lex(NonnullRefPtr<compiler::Compiler> const compiler);
-public: ErrorOr<DeprecatedString> debug_description() const;
-};struct LiteralPrefix {
+struct LiteralPrefix {
 u8 __jakt_variant_index = 0;
 union VariantData {
 u8 __jakt_uninit_value;
@@ -572,13 +536,43 @@ utility::Span span() const;
 private:
 Token() {};
 };
-}
-} // namespace Jakt
-template<>struct Jakt::Formatter<Jakt::lexer::Lexer> : Jakt::Formatter<Jakt::StringView>{
-Jakt::ErrorOr<void> format(Jakt::FormatBuilder& builder, Jakt::lexer::Lexer const& value) {
-JaktInternal::PrettyPrint::ScopedEnable pretty_print_enable { m_alternative_form };Jakt::ErrorOr<void> format_error = Jakt::Formatter<Jakt::StringView>::format(builder, MUST(value.debug_description()));return format_error;}
-};
-namespace Jakt {
+struct Lexer {
+  public:
+public: size_t index;public: JaktInternal::DynamicArray<u8> input;public: NonnullRefPtr<compiler::Compiler> compiler;public: JaktInternal::Optional<JaktInternal::DynamicArray<u8>> comment_contents;public: JaktInternal::Set<DeprecatedString> illegal_cpp_keywords;public: ErrorOr<JaktInternal::Optional<DeprecatedString>> consume_comment_contents();
+public: ErrorOr<lexer::Token> lex_quoted_string(u8 const delimiter);
+public: ErrorOr<JaktInternal::Optional<lexer::Token>> next();
+public: ErrorOr<lexer::Token> lex_character_constant_or_name();
+public: lexer::Token lex_dot();
+public: lexer::Token lex_question_mark();
+public: ErrorOr<lexer::Token> lex_forward_slash();
+public: u8 peek_behind(size_t const steps) const;
+public: u8 peek_ahead(size_t const steps) const;
+public: lexer::Token lex_asterisk();
+public: lexer::Token lex_minus();
+public: u8 peek() const;
+public: lexer::Token lex_percent_sign();
+public: ErrorOr<lexer::Token> lex_number_or_name();
+public: lexer::Token lex_less_than();
+public: bool eof() const;
+public: Lexer(size_t a_index, JaktInternal::DynamicArray<u8> a_input, NonnullRefPtr<compiler::Compiler> a_compiler, JaktInternal::Optional<JaktInternal::DynamicArray<u8>> a_comment_contents, JaktInternal::Set<DeprecatedString> a_illegal_cpp_keywords);
+
+public: lexer::Token lex_ampersand();
+public: utility::Span span(size_t const start, size_t const end) const;
+public: lexer::Token lex_plus();
+public: lexer::Token lex_exclamation_point();
+public: ErrorOr<lexer::LiteralSuffix> consume_numeric_literal_suffix();
+public: lexer::Token lex_colon();
+public: bool valid_digit(lexer::LiteralPrefix const prefix, u8 const digit, bool const decimal_allowed);
+public: ErrorOr<void> error(DeprecatedString const message, utility::Span const span);
+public: lexer::Token lex_equals();
+public: ErrorOr<DeprecatedString> substring(size_t const start, size_t const length) const;
+public: lexer::Token lex_greater_than();
+public: lexer::Token lex_pipe();
+public: lexer::Token lex_caret();
+public: ErrorOr<lexer::Token> lex_number();
+public: static ErrorOr<JaktInternal::DynamicArray<lexer::Token>> lex(NonnullRefPtr<compiler::Compiler> const compiler);
+public: ErrorOr<DeprecatedString> debug_description() const;
+};}
 } // namespace Jakt
 template<>struct Jakt::Formatter<Jakt::lexer::LiteralPrefix> : Jakt::Formatter<Jakt::StringView>{
 Jakt::ErrorOr<void> format(Jakt::FormatBuilder& builder, Jakt::lexer::LiteralPrefix const& value) {
@@ -594,6 +588,12 @@ namespace Jakt {
 } // namespace Jakt
 template<>struct Jakt::Formatter<Jakt::lexer::Token> : Jakt::Formatter<Jakt::StringView>{
 Jakt::ErrorOr<void> format(Jakt::FormatBuilder& builder, Jakt::lexer::Token const& value) {
+JaktInternal::PrettyPrint::ScopedEnable pretty_print_enable { m_alternative_form };Jakt::ErrorOr<void> format_error = Jakt::Formatter<Jakt::StringView>::format(builder, MUST(value.debug_description()));return format_error;}
+};
+namespace Jakt {
+} // namespace Jakt
+template<>struct Jakt::Formatter<Jakt::lexer::Lexer> : Jakt::Formatter<Jakt::StringView>{
+Jakt::ErrorOr<void> format(Jakt::FormatBuilder& builder, Jakt::lexer::Lexer const& value) {
 JaktInternal::PrettyPrint::ScopedEnable pretty_print_enable { m_alternative_form };Jakt::ErrorOr<void> format_error = Jakt::Formatter<Jakt::StringView>::format(builder, MUST(value.debug_description()));return format_error;}
 };
 namespace Jakt {
