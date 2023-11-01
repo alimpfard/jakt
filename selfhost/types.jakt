@@ -82,8 +82,9 @@ struct GenericInferences {
 
     fn set(mut this, anon key: TypeId, anon value: TypeId) throws {
         if key == value {
-            println("Warning: Generic parameter {} is being bound to itself", key)
-            abort()
+            // println("Warning: Generic parameter {} is being bound to itself", key)
+            // abort()
+            return
         }
 
         let mapped_value = .map(value)
@@ -1982,7 +1983,7 @@ class CheckedProgram {
         scope_id: ScopeId
         var: String
         ignore_mixin_scopes: bool = false
-        ignore_parent_scopes: bool = false
+        root_scope: ScopeId? = None
     ) throws -> CheckedVariable? {
         return .for_each_scope_accessible_unqualified_from_scope(
             scope_id
@@ -1995,7 +1996,7 @@ class CheckedProgram {
                 return IterationDecision::Continue
             }
             ignore_mixin_scopes
-            ignore_parent_scopes
+            root_scope
         )
     }
 
@@ -2004,7 +2005,7 @@ class CheckedProgram {
         scope_id: ScopeId
         anon name: String
         ignore_mixin_scopes: bool = false
-        ignore_parent_scopes: bool = false
+        root_scope: ScopeId? = None
     ) throws -> Value? {
         return .for_each_scope_accessible_unqualified_from_scope(
             scope_id
@@ -2017,7 +2018,7 @@ class CheckedProgram {
                 return IterationDecision::Continue
             }
             ignore_mixin_scopes
-            ignore_parent_scopes
+            root_scope
         )
     }
 
@@ -2026,7 +2027,7 @@ class CheckedProgram {
         scope_id: ScopeId
         name: String
         ignore_mixin_scopes: bool = false
-        ignore_parent_scopes: bool = false
+        root_scope: ScopeId? = None
     ) throws -> (TypeId, ScopeId)? {
         return .for_each_scope_accessible_unqualified_from_scope(
             scope_id
@@ -2038,7 +2039,7 @@ class CheckedProgram {
                 return IterationDecision::Continue
             }
             ignore_mixin_scopes
-            ignore_parent_scopes
+            root_scope
         )
     }
 
@@ -2047,9 +2048,9 @@ class CheckedProgram {
         scope_id: ScopeId
         name: String
         ignore_mixin_scopes: bool = false
-        ignore_parent_scopes: bool = false
+        root_scope: ScopeId? = None
     ) throws -> TypeId? {
-        return .find_type_scope(scope_id, name, ignore_mixin_scopes, ignore_parent_scopes)?.0
+        return .find_type_scope(scope_id, name, ignore_mixin_scopes, root_scope)?.0
     }
 
     public fn find_enum_in_scope(
@@ -2057,7 +2058,7 @@ class CheckedProgram {
         scope_id: ScopeId
         name: String
         ignore_mixin_scopes: bool = false
-        ignore_parent_scopes: bool = false
+        root_scope: ScopeId? = None
     ) throws -> EnumId? {
         return .for_each_scope_accessible_unqualified_from_scope(
             scope_id
@@ -2070,7 +2071,7 @@ class CheckedProgram {
                 return IterationDecision::Continue
             }
             ignore_mixin_scopes
-            ignore_parent_scopes
+            root_scope
         )
     }
 
@@ -2079,7 +2080,7 @@ class CheckedProgram {
         scope_id: ScopeId
         name: String
         ignore_mixin_scopes: bool = false
-        ignore_parent_scopes: bool = false
+        root_scope: ScopeId? = None
     ) throws -> TraitId? {
         return .for_each_scope_accessible_unqualified_from_scope(
             scope_id
@@ -2092,7 +2093,7 @@ class CheckedProgram {
                 return IterationDecision::Continue
             }
             ignore_mixin_scopes
-            ignore_parent_scopes
+            root_scope
         )
     }
 
@@ -2132,7 +2133,7 @@ class CheckedProgram {
         this
         scope_id: ScopeId
         anon callback: &fn(scope_id: ScopeId, name_override: String?, is_alias: bool) throws -> IterationDecision<bool>
-        ignore_parent_scopes: bool
+        root_scope: ScopeId?
     ) throws -> bool? {
         // Only scan the direct chain of scopes, not the entire tree
 
@@ -2162,7 +2163,7 @@ class CheckedProgram {
 
             let scope = .get_scope(scope_id)
 
-            if not ignore_parent_scopes and scope.parent.has_value() {
+            if not (root_scope.has_value() and scope_id == root_scope!) and scope.parent.has_value() {
                 scopes_to_check.enqueue(scope.parent!)
             }
 
@@ -2183,10 +2184,10 @@ class CheckedProgram {
         scope_id: ScopeId
         anon callback: &fn(scope_id: ScopeId, name_override: String?, is_alias: bool) throws -> IterationDecision<bool>
         ignore_mixin_scopes: bool = false
-        ignore_parent_scopes: bool = false
+        root_scope: ScopeId? = None
     ) throws -> bool? {
         if ignore_mixin_scopes {
-            return .for_each_scope_accessible_unqualified_from_scope_direct_chain(scope_id, callback, ignore_parent_scopes)
+            return .for_each_scope_accessible_unqualified_from_scope_direct_chain(scope_id, callback, root_scope)
         }
 
         // Effect:
@@ -2241,6 +2242,7 @@ class CheckedProgram {
 
         while not scopes_to_check.is_empty() {
             let scope_id = scopes_to_check.dequeue()
+
             if seen.contains(scope_id) {
                 continue
             }
@@ -2257,24 +2259,18 @@ class CheckedProgram {
 
             let scope = .get_scope(scope_id)
 
-            if not ignore_parent_scopes and scope.parent.has_value() {
+            if not (root_scope.has_value() and scope_id == root_scope!) and scope.parent.has_value() {
                 scopes_to_check.enqueue(scope.parent!)
-                for child in .get_scope(scope.parent!).children {
-                    scopes_to_check.enqueue(child)
-                }
             }
 
-            if not scope.namespace_name.has_value() {
-                for child in scope.children {
+            for child in scope.children {
+                if not .get_scope(child).namespace_name.has_value() {
                     scopes_to_check.enqueue(child)
                 }
             }
 
             for entry in scope.resolution_mixins {
                 scopes_to_check.enqueue(entry)
-                for child in .get_scope(entry).children {
-                    scopes_to_check.enqueue(child)
-                }
             }
 
             for (name, alias) in scope.aliases {
@@ -2313,7 +2309,7 @@ class CheckedProgram {
         scope_id: ScopeId
         anon callback: &fn(scope_id: ScopeId, name_override: String?, is_alias: bool) throws -> IterationDecision<T>
         ignore_mixin_scopes: bool = false
-        ignore_parent_scopes: bool = false
+        root_scope: ScopeId? = None
     ) throws -> T? {
         mut result: T? = None
         .for_each_scope_accessible_unqualified_from_scope_impl(
@@ -2330,7 +2326,7 @@ class CheckedProgram {
                 }
             }
             ignore_mixin_scopes
-            ignore_parent_scopes
+            root_scope
         )
 
         return result
@@ -2341,7 +2337,7 @@ class CheckedProgram {
         scope_id: ScopeId
         name: String
         ignore_mixin_scopes: bool = false
-        ignore_parent_scopes: bool = false
+        root_scope: ScopeId? = None
     ) throws -> StructId? {
         return .for_each_scope_accessible_unqualified_from_scope(
             scope_id
@@ -2355,7 +2351,7 @@ class CheckedProgram {
                 return IterationDecision::Continue
             }
             ignore_mixin_scopes
-            ignore_parent_scopes
+            root_scope
         )
     }
 
@@ -2445,6 +2441,7 @@ class CheckedProgram {
         anon name: String
         treat_aliases_as_imports: bool = false
         ignore_mixin_scopes: bool = false
+        root_scope: ScopeId? = None
     ) throws -> (ScopeId, bool)? {
         return .for_each_scope_accessible_unqualified_from_scope(
             scope_id
@@ -2460,14 +2457,28 @@ class CheckedProgram {
                     return IterationDecision::Break(value: (scope_id, is_import or (is_alias and treat_aliases_as_imports)))
                 }
 
+                for child in scope.children {
+                    let child_scope = .get_scope(child)
+                    let effective_name = name_override ?? child_scope.namespace_name
+                    if effective_name.has_value() and effective_name! == name {
+                        return IterationDecision::Break(value: (child, false))
+                    }
+                }
+
                 return IterationDecision::Continue
             }
             ignore_mixin_scopes
+            root_scope
         )
     }
 
-    public fn find_function_in_scope(this, parent_scope_id: ScopeId, function_name: String) throws -> FunctionId? {
-        let results = .find_functions_with_name_in_scope(parent_scope_id, function_name)
+    public fn find_function_in_scope(
+        this
+        parent_scope_id: ScopeId
+        function_name: String
+        root_scope: ScopeId? = None
+    ) throws -> FunctionId? {
+        let results = .find_functions_with_name_in_scope(parent_scope_id, function_name, root_scope)
         if not results.has_value() {
             return None
         }
@@ -2480,8 +2491,13 @@ class CheckedProgram {
         return functions[0]
     }
 
-    public fn find_default_constructors_in_scope(this, parent_scope_id: ScopeId, function_name: String) throws -> FunctionId? {
-        let results = .find_functions_with_name_in_scope(parent_scope_id, function_name)
+    public fn find_default_constructors_in_scope(
+        this
+        parent_scope_id: ScopeId
+        function_name: String
+        root_scope: ScopeId? = None
+    ) throws -> FunctionId? {
+        let results = .find_functions_with_name_in_scope(parent_scope_id, function_name, root_scope)
         if not results.has_value() {
             return None
         }
@@ -2501,9 +2517,9 @@ class CheckedProgram {
         parent_scope_id: ScopeId
         function_name: String
         ignore_mixin_scopes: bool = false
-        ignore_parent_scopes: bool = false
+        root_scope: ScopeId? = None
     ) throws -> [FunctionId]? {
-        return .find_scoped_functions_with_name_in_scope(parent_scope_id, function_name, ignore_mixin_scopes, ignore_parent_scopes)?.0
+        return .find_scoped_functions_with_name_in_scope(parent_scope_id, function_name, ignore_mixin_scopes, root_scope)?.0
     }
 
     public fn find_scoped_functions_with_name_in_scope(
@@ -2511,7 +2527,7 @@ class CheckedProgram {
         parent_scope_id: ScopeId
         function_name: String
         ignore_mixin_scopes: bool = false
-        ignore_parent_scopes: bool = false
+        root_scope: ScopeId? = None
     ) throws -> ([FunctionId], ScopeId)? {
         mut result_ids: [FunctionId] = []
         mut result_scope: ScopeId? = None
@@ -2534,7 +2550,7 @@ class CheckedProgram {
                 return IterationDecision::Continue
             }
             ignore_mixin_scopes
-            ignore_parent_scopes
+            root_scope
         )
 
         if result_scope is None {
