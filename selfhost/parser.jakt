@@ -1513,6 +1513,7 @@ boxed enum ParsedType {
     Function(params: [ParsedParameter], can_throw: bool, return_type: ParsedType, span: Span)
     Const(expr: ParsedExpression, span: Span)
     DependentType(base: ParsedType, name: String, span: Span)
+    Synthetic(expr: ParsedExpression, span: Span)
     Empty
 
     fn span(this) -> Span => match this {
@@ -1521,6 +1522,10 @@ boxed enum ParsedType {
     }
 
     fn equals(this, anon rhs_parsed_type: ParsedType) -> bool => match this {
+        Synthetic(expr: lhs_expr) => match rhs_parsed_type {
+            Synthetic(expr: rhs_expr) => lhs_expr.equals(rhs_expr)
+            else => false
+        }
         DependentType(base, name) => match rhs_parsed_type {
             DependentType(base: rhs_base, name: rhs_name) => base.equals(rhs_base) and name == rhs_name
             else => false
@@ -4259,6 +4264,17 @@ struct Parser {
         }
         Identifier(name) => {
             let span = .current().span()
+            if name == "type" and .peek(1) is LParen {
+                .index += 2
+                let expr = .parse_operand_base()
+                if .current() is RParen {
+                    .index++
+                } else {
+                    .error("Expected ‘)’", .current().span())
+                }
+                return ParsedType::Synthetic(qualifiers, expr, span: merge_spans(span, .current().span()))
+            }
+
             .index++
             mut parsed_type = ParsedType::Name(qualifiers, name, span)
             if .current() is LessThan {

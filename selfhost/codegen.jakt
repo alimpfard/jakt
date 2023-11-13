@@ -2782,7 +2782,7 @@ struct CodeGenerator {
                             Enum(enum_id) => enum_id
                             GenericEnumInstance(id) => id
                             else => {
-                                panic(format("Unexpected type in IsEnumVariant: {}", .program.get_type(enum_type_id)))
+                                panic(format("Unexpected type in IsEnumVariant: {} {}", .program.type_name(enum_type_id), expression))
                             }
                         })
                         match enum_.record_type {
@@ -2808,7 +2808,7 @@ struct CodeGenerator {
                                 suffix += format("== {}{}::{}", .codegen_namespace_qualifier(scope_id: enum_.scope_id), enum_.name, name)
                             }
                             else => {
-                                panic(format("Unexpected enum record type in IsEnumVariant: {}", enum_.record_type))
+                                panic(format("Unexpected enum record type in IsEnumVariant: {} ({})", .program.type_name(enum_.type_id), expression))
                             }
                         }
                         yield suffix
@@ -3207,7 +3207,7 @@ struct CodeGenerator {
                         Enum(enum_id) => enum_id
                         GenericEnumInstance(id) => id
                         else => {
-                            panic(format("Unexpected type in IsEnumVariant: {}", .program.get_type(subject_type_id)))
+                            panic(format("Unexpected type in IsEnumVariant: {} {}", .program.type_name(subject_type_id), case_))
                         }
                     })
                     // FIXME: This should be a call to find(), but we do not yet provide the needed operator== for that

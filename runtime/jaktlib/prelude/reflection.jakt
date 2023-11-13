@@ -1,4 +1,17 @@
 namespace Reflect {
+    struct StructId {
+        id: usize
+        module_id: usize
+    }
+    struct EnumId {
+        id: usize
+        module_id: usize
+    }
+    struct TypeId {
+        id: usize
+        module_id: usize
+    }
+
     struct Span {
         start: usize
         end: usize
@@ -43,10 +56,20 @@ namespace Reflect {
         Untyped(name: String)
     }
     enum RecordType {
-        Struct(fields: [Reflect::Field])
-        Class(fields: [Reflect::Field])
-        // ValueEnum(underlying_type: Reflect::Type, variants: [Reflect::ValueEnumVariant])
-        SumEnum(is_boxed: bool, variants: [Reflect::SumEnumVariant])
+        Struct(
+            existing_id: Optional<Reflect::StructId> = None
+            fields: [Reflect::Field]
+        )
+        Class(
+            existing_id: Optional<Reflect::StructId> = None
+            fields: [Reflect::Field]
+        )
+        // ValueEnum(existing_id: Reflect::EnumId?, underlying_type: Reflect::Type, variants: [Reflect::ValueEnumVariant])
+        SumEnum(
+            existing_id: Optional<Reflect::EnumId> = None
+            is_boxed: bool
+            variants: [Reflect::SumEnumVariant]
+        )
     }
     struct Record {
         name: String
@@ -55,6 +78,8 @@ namespace Reflect {
         record_type: Reflect::RecordType
     }
     boxed enum Type {
+        existing_id: Optional<Reflect::TypeId> = None
+
         Void
         Bool
         U8
@@ -73,11 +98,11 @@ namespace Reflect {
         CInt
         Unknown
         Never
-        StructureOrEnum(Reflect::Record)
-        TypeVariable(String)
-        RawPtr(Reflect::Type)
-        Reference(Reflect::Type)
-        MutableReference(Reflect::Type)
+        StructureOrEnum(record: Reflect::Record)
+        TypeVariable(name: String)
+        RawPtr(type: Reflect::Type)
+        Reference(type: Reflect::Type)
+        MutableReference(type: Reflect::Type)
         Function
 
         fn name(this) throws => match this {

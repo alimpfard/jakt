@@ -179,9 +179,10 @@ set(SELFHOST_STDLIB_SOURCES
   jakt__libc__io.cpp
   jakt__arguments.cpp
   jakt__file_iterator.cpp
+  jakt__path.cpp
   jakt__platform.cpp
   jakt__platform__utility.cpp
-  jakt__path.cpp
+  jakt__prelude__reflection.cpp
 )
 
 if(CMAKE_HOST_WIN32)

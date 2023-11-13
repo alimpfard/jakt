@@ -5642,6 +5642,41 @@ struct Typechecker {
                 let type_id = .find_or_add_type_id(Type::Dependent(namespace_type: base_type, name: dependent_name))
                 yield .substitute_typevars_in_type(type_id, generic_inferences: .generic_inferences)
             }
+            Synthetic(expr) => {
+                let checked_expr = .typecheck_expression(
+                    expr
+                    scope_id
+                    safety_mode: SafetyMode::Safe
+                    type_hint: None
+                )
+                mut interpreter = .interpreter()
+                mut scope = InterpreterScope::from_runtime_scope(scope_id, program: .program)
+                let result = try interpreter.execute_expression(expr: checked_expr, scope) catch error {
+                    .error(
+                        format("Could not evaluate synthetic type expression: {}", error)
+                        expr.span()
+                    )
+                    return .find_or_add_type_id(Type::Unknown)
+                }
+                let reflected_type_value = match result {
+                    JustValue(value) => value
+                    else => {
+                        .error(
+                            format("Could not evaluate synthetic type expression: {}", result)
+                            expr.span()
+                        )
+                        return .find_or_add_type_id(Type::Unknown)
+                    }
+                }
+                let type_descriptor = try interpreter.create_synthetic_type(reflected_type_value, scope_id, span: parsed_type.span()) catch e {
+                    .error(
+                        format("Could not create synthetic type: {}", e)
+                        expr.span()
+                    )
+                    return .find_or_add_type_id(Type::Unknown)
+                }
+                yield .find_or_add_type_id(type_descriptor)
+            }
             Const(expr) => {
                 let checked_expr = .typecheck_expression(
                     expr

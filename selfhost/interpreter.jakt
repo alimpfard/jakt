@@ -1,11 +1,11 @@
 import types {
     BinaryOperator, BlockControlFlow, BuiltinType, CheckedBlock, CheckedCall, CheckedEnum, CheckedEnumVariant
     CheckedExpression, CheckedField, CheckedFunction, CheckedMatchBody, CheckedNumericConstant, CheckedParameter
-    CheckedProgram, CheckedStatement, CheckedStringLiteral, CheckedTypeCast, CheckedUnaryOperator, CheckedVariable
-    CheckedVisibility, EnumId, EnumVariantPatternArgument, FunctionGenerics, FunctionId, GenericInferences, ModuleId
-    NumericOrStringValue, ParsedStatement, ResolvedNamespace, SafetyMode, Scope, ScopeId, Span, StringLiteral
-    StructId, Type, TypeId, TypecheckFunctions, Value, ValueImpl, VarId, builtin, comptime_format_impl
-    unknown_type_id, void_type_id
+    CheckedProgram, CheckedStatement, CheckedStringLiteral, CheckedStruct, CheckedTypeCast, CheckedUnaryOperator
+    CheckedVariable, CheckedVisibility, EnumId, EnumVariantPatternArgument, FunctionGenerics, FunctionId
+    GenericInferences, ModuleId, NumericOrStringValue, ParsedStatement, ResolvedNamespace, SafetyMode, Scope
+    ScopeId, Span, StringLiteral, StructId, StructOrEnumId, Type, TypeId, TypecheckFunctions, Value, ValueImpl
+    VarId, builtin, comptime_format_impl, unknown_type_id, void_type_id, DefinitionLinkage, RecordType
 }
 import parser { FunctionLinkage, FunctionType, ParsedBlock, ParsedExpression }
 import utility { escape_for_quotes, interpret_escapes, panic }
@@ -1020,6 +1020,185 @@ class Interpreter {
         return function(parsed_block: block, parent_scope_id, safety_mode: SafetyMode::Safe, yield_type_hint: None, function_id)
     }
 
+    fn find_reflected_primitive_enum_variant(mut this, primitive_name: String, value: Value) throws -> (String, [Value]) {
+        let type_enum_id = match .program.find_reflected_primitive(primitive_name) {
+            Enum(id) => id
+            else => {
+                panic("Expected Reflect::Type to be an enum")
+            }
+        }
+
+        guard value.impl is Enum(fields, enum_id, constructor) else {
+            throw Error::from_string_literal("Expected an instance of Reflect::Type")
+        }
+        guard type_enum_id == enum_id else {
+            throw Error::from_string_literal("Expected an instance of Reflect::Type")
+        }
+
+        let type_ctors = &.program.get_scope(.program.get_enum(type_enum_id).scope_id).functions
+        mut selected_variant_name: String? = None
+        for (name, ids) in type_ctors {
+            for id in ids {
+                if id == constructor {
+                    return (name, fields)
+                }
+            }
+        }
+
+        panic("Expected Reflect primitive to contain the constructor for a reflected type")
+    }
+
+    public fn create_synthetic_type(mut this, anon value: Value, scope_id: ScopeId, span: Span) throws -> Type {
+        let reflected = .synth_reflect_type(value)
+        if reflected.existing_id is Some(id) {
+            return .program.get_type(TypeId(
+                module: ModuleId(id: id.module_id)
+                id: id.id
+            ))
+        }
+        return .create_synthetic_type(reflected, scope_id, span)
+    }
+
+    fn create_synthetic_type(mut this, anon type: Reflect::Type, scope_id: ScopeId, span: Span) throws -> Type {
+        return match type {
+            Void => Type::Void
+            Bool => Type::Bool
+            U8 => Type::U8
+            U16 => Type::U16
+            U32 => Type::U32
+            U64 => Type::U64
+            Usize => Type::Usize
+            I8 => Type::I8
+            I16 => Type::I16
+            I32 => Type::I32
+            I64 => Type::I64
+            F32 => Type::F32
+            F64 => Type::F64
+            JaktString => Type::JaktString
+            CChar => Type::CChar
+            CInt => Type::CInt
+            Unknown => Type::Unknown
+            Never => Type::Never
+            RawPtr(type) => Type::RawPtr(.program.find_or_add_type_id(.create_synthetic_type(type, scope_id, span), module_id: scope_id.module_id))
+            Reference(type) => Type::Reference(.program.find_or_add_type_id(.create_synthetic_type(type, scope_id, span), module_id: scope_id.module_id))
+            MutableReference(type) => Type::MutableReference(.program.find_or_add_type_id(.create_synthetic_type(type, scope_id, span), module_id: scope_id.module_id))
+            TypeVariable(name) => Type::TypeVariable(name, trait_implementations: [])
+            StructureOrEnum(record) => .create_synthetic_record(record, scope_id, span)
+            Function => {
+                throw Error::from_string_literal("Not yet implemented")
+            }
+        }
+    }
+
+    public fn create_synthetic_record(mut this, anon record: Reflect::Record, scope_id: ScopeId, span: Span) throws -> Type {
+        return match record.record_type {
+            Struct(existing_id, fields) => {
+                if existing_id is Some(id) {
+                    return Type::Struct(StructId(
+                        module: ModuleId(id: id.module_id)
+                        id: id.id
+                    ))
+                }
+                yield .create_synthetic_struct(record, fields, scope_id, span, is_boxed: false)
+            }
+            Class(existing_id, fields) => {
+                if existing_id is Some(id) {
+                    return Type::Struct(StructId(
+                        module: ModuleId(id: id.module_id)
+                        id: id.id
+                    ))
+                }
+                yield .create_synthetic_struct(record, fields, scope_id, span, is_boxed: true)
+            }
+            SumEnum(existing_id) => {
+                if existing_id is Some(id) {
+                    return Type::Enum(EnumId(
+                        module: ModuleId(id: id.module_id)
+                        id: id.id
+                    ))
+                }
+                throw Error::from_string_literal("Not yet implemented")
+            }
+        }
+    }
+
+    fn create_synthetic_struct(
+        mut this
+        anon record: Reflect::Record
+        anon reflected_fields: [Reflect::Field]
+        anon scope_id: ScopeId
+        span: Span
+        is_boxed: bool
+    ) throws -> Type {
+        let struct_scope_id = .program.create_scope(
+            parent_scope_id: scope_id
+            can_throw: false
+            debug_name: format("synthetic-struct({})", record.name)
+            module_id: scope_id.module_id
+            for_block: false
+        )
+
+        mut fields: [CheckedField] = []
+        for reflected_field in reflected_fields {
+            let variable = .create_synthetic_variable(reflected_field.variable, reflected_field.visibility, scope_id, span)
+            let var_id = .program.get_module(scope_id.module_id).add_variable(variable)
+            .program.set_owner_scope_if_needed(parent_scope_id: struct_scope_id, var_id)
+            let field = CheckedField(variable_id: var_id, default_value_expression: None)
+            fields.push(field)
+        }
+
+        let struct_id = StructId(module: scope_id.module_id, id: .program.get_module(scope_id.module_id).structures.size())
+        let type_id = .program.find_or_add_type_id(
+            type: Type::Struct(struct_id)
+            module_id: scope_id.module_id
+            only_in_current_module: true
+        )
+
+        let struct_ = CheckedStruct(
+            name: record.name
+            name_span: span
+            generic_parameters: []
+            generic_parameter_defaults: None
+            fields
+            scope_id: struct_scope_id
+            definition_linkage: DefinitionLinkage::Internal
+            trait_implementations: [:]
+            record_type: match is_boxed {
+                true => RecordType::Class(fields: [], super_type: None)
+                false => RecordType::Struct(fields: [], super_type: None)
+            }
+            type_id
+            super_struct_id: None
+        )
+
+        .program.get_module(scope_id.module_id).structures.push(struct_)
+        mut scope = .program.get_scope(scope_id)
+        scope.structs.set(record.name, struct_id)
+        scope.types.set(record.name, type_id)
+
+        return Type::Struct(struct_id)
+    }
+
+    fn create_synthetic_variable(
+        mut this
+        anon variable: Reflect::VariableDeclaration
+        anon visibility: Reflect::Visibility
+        scope_id: ScopeId
+        span: Span
+    ) throws -> CheckedVariable {
+        let type_id = .program.find_or_add_type_id(.create_synthetic_type(variable.type, scope_id, span), module_id: scope_id.module_id)
+        return CheckedVariable(
+            name: variable.name
+            type_id
+            is_mutable: variable.is_mutable
+            definition_span: span
+            type_span: None
+            visibility: match visibility {
+                Public => CheckedVisibility::Public
+                Private => CheckedVisibility::Private
+            }
+        )
+    }
 
     public fn perform_final_interpretation_pass(
         mut this
@@ -6777,7 +6956,9 @@ class Interpreter {
                     }
 
                     if not catch_all_case.has_value() and not found_body.has_value() {
-                        .error("Match is not exhaustive", span!)
+                        if span.has_value() {
+                            .error("Match is not exhaustive", span!)
+                        }
                         throw Error::from_string_literal("Invalid type")
                     }
 
@@ -6883,7 +7064,7 @@ class Interpreter {
                             }
                             EnumVariant(marker_span) => {
                                 .error(
-                                    format("Value matches cannot have enum variant arms (matching on {})", value.type_name()),
+                                    format("Value matches cannot have enum variant arms (matching on {})", value),
                                     marker_span)
                                 throw Error::from_string_literal("Invalid type")
                             }
@@ -7238,6 +7419,118 @@ class Interpreter {
         }
     }
 
+    public fn usize_from_value(mut this, anon value: Value) throws -> usize => match value.impl {
+        USize(x) => x
+        else => {
+            .error("Expected usize value", value.span)
+            throw Error::from_string_literal("Invalid type")
+        }
+    }
+
+    public fn struct_value(
+        mut this
+        struct_id: StructId
+        constructor: FunctionId
+        fields: [Value]
+        span: Span
+    ) throws -> Value => Value(
+        impl: ValueImpl::Struct(
+            fields
+            struct_id
+            constructor
+        )
+        span
+    )
+
+    public fn enum_value(
+        mut this
+        enum_id: EnumId
+        constructor: FunctionId
+        fields: [Value]
+        span: Span
+    ) throws -> Value => Value(
+        impl: ValueImpl::Enum(
+            fields
+            enum_id
+            constructor
+        )
+        span
+    )
+
+    public fn optional_value(
+        mut this
+        value: Value?
+        span: Span
+    ) throws -> Value => Value(
+        impl: match value.has_value() {
+            true => ValueImpl::OptionalSome(value: value!)
+            false => ValueImpl::OptionalNone
+        }
+        span
+    )
+
+    public fn reflect_id(mut this, anon id: EnumId, span: Span) throws -> Value {
+        let struct_id = match .program.find_reflected_primitive("EnumId") {
+            Struct(id) => id
+            else => {
+                panic("Expected EnumId to be a struct")
+            }
+        }
+        let constructor = .program.find_function_in_scope(
+            parent_scope_id: .program.get_struct(struct_id).scope_id
+            function_name: "EnumId"
+        )!
+        return .struct_value(
+            struct_id
+            constructor
+            fields: [.usize_value(id.id, span), .usize_value(id.module.id, span)]
+            span
+        )
+    }
+
+    public fn reflect_id(mut this, anon id: StructId, span: Span) throws -> Value {
+        let struct_id = match .program.find_reflected_primitive("StructId") {
+            Struct(id) => id
+            else => {
+                panic("Expected StructId to be a struct")
+            }
+        }
+        let constructor = .program.find_function_in_scope(
+            parent_scope_id: .program.get_struct(struct_id).scope_id
+            function_name: "StructId"
+        )!
+        return .struct_value(
+            struct_id
+            constructor
+            fields: [.usize_value(id.id, span), .usize_value(id.module.id, span)]
+            span
+        )
+    }
+
+    public fn reflect_id(mut this, anon id: TypeId, span: Span) throws -> Value {
+        let struct_id = match .program.find_reflected_primitive("TypeId") {
+            Struct(id) => id
+            else => {
+                panic("Expected TypeId to be a struct")
+            }
+        }
+        let constructor = .program.find_function_in_scope(
+            parent_scope_id: .program.get_struct(struct_id).scope_id
+            function_name: "TypeId"
+        )!
+        return .struct_value(
+            struct_id
+            constructor
+            fields: [.usize_value(id.id, span), .usize_value(id.module.id, span)]
+            span
+        )
+    }
+
+    public fn usize_value(mut this, anon value: usize, anon span: Span) throws -> Value => Value(
+        impl: ValueImpl::USize(value)
+        span
+    )
+
     public fn reflect_methods(
         mut this
         anon scope_id: ScopeId
@@ -7534,7 +7827,9 @@ class Interpreter {
         )
         .reflected_type_cache.set(mapped_type_id, result)
 
-        mut fields: [Value] = []
+        mut fields: [Value] = [
+            .reflect_id(mapped_type_id, span)
+        ]
         let found_constructor = match type {
             Void | I8 | I16 | I32 | I64 | U8 | U16 | U32 | U64 | Usize | F32 | F64 | JaktString | CChar | CInt | Bool | Unknown | Never => {
                 let constructor = .program.find_function_in_scope(
@@ -7558,7 +7853,7 @@ class Interpreter {
                     throw Error::from_string_literal("Invalid type")
                 }
 
-                fields = [.string_value(name, span)]
+                fields.push(.string_value(name, span))
                 yield constructor!
             }
             RawPtr(type_id) | Reference(type_id) | MutableReference(type_id) => {
@@ -7566,7 +7861,7 @@ class Interpreter {
                     parent_scope_id: .program.get_enum(reflected_enum_id).scope_id
                     function_name: type.constructor_name())!
 
-                fields = [.reflect_type(type_id, span, scope)]
+                fields.push(.reflect_type(type_id, span, scope))
                 yield constructor
             }
             GenericInstance(id: struct_id) | Struct(struct_id) => {
@@ -7599,7 +7894,13 @@ class Interpreter {
                 }
                 let record_type_struct_constructor = .program.find_function_in_scope(
                     parent_scope_id: .program.get_enum(record_type_enum_id).scope_id
-                    function_name: "Struct")!
+                    function_name: match subject_struct.record_type {
+                        Struct => "Struct"
+                        Class => "Class"
+                        else => {
+                            throw Error::from_string_literal("Invalid type")
+                        }
+                    })!
 
                 let methods = .reflect_methods(subject_struct.scope_id, span, scope)
                 let tuple_type = .tuple_type([.string_type(), reflected_enum.type_id])
@@ -7649,38 +7950,30 @@ class Interpreter {
                     }
                 }
 
-                fields = [
-                    Value(
-                        impl: ValueImpl::Struct(
-                            fields: [
-                                // name:
-                                .string_value(subject_struct.name, span)
-                                methods
-                                generic_parameters
-                                // record_type:
-                                Value(
-                                    impl: ValueImpl::Enum(
-                                        fields: [
-                                            Value(
-                                                impl: ValueImpl::JaktArray(
-                                                    values: record_type_fields
-                                                    type_id: .array_type_of_struct(field_struct_id)
-                                                )
-                                                span
-                                            )
-                                        ]
-                                        enum_id: record_type_enum_id
-                                        constructor: record_type_struct_constructor
-                                    )
-                                    span
-                                )
-                            ]
-                            struct_id: record_struct_id
-                            constructor: record_struct_constructor
-                        )
+                fields.push(
+                    .struct_value(
+                        struct_id: record_struct_id
+                        constructor: record_struct_constructor
+                        fields: [
+                            // name:
+                            .string_value(subject_struct.name, span)
+                            methods
+                            generic_parameters
+                            .enum_value(
+                                enum_id: record_type_enum_id
+                                constructor: record_type_struct_constructor
+                                fields: [
+                                    // existing_id:
+                                    .optional_value(value: .reflect_id(struct_id, span), span)
+                                    // fields:
+                                    .array_value_of_type(values: record_type_fields, type: .array_type_of_struct(field_struct_id), span)
+                                ]
+                                span
+                            )
+                        ]
                         span
                     )
-                ]
+                )
 
                 yield constructor!
             }
@@ -7773,41 +8066,33 @@ class Interpreter {
                     }
                 }
 
-                fields = [
-                    Value(
-                        impl: ValueImpl::Struct(
-                            fields: [
-                                // name:
-                                .string_value(subject_enum.name, span)
-                                methods
-                                generic_parameters
-                                // record_type:
-                                Value(
-                                    impl: ValueImpl::Enum(
-                                        fields: [
-                                            // is_boxed:
-                                            .bool_value(subject_enum.is_boxed, span)
-                                            // variants:
-                                            Value(
-                                                impl: ValueImpl::JaktArray(
-                                                    values: record_type_fields
-                                                    type_id: .array_type_of_struct(field_struct_id)
-                                                )
-                                                span
-                                            )
-                                        ]
-                                        enum_id: record_type_enum_id
-                                        constructor: record_type_struct_constructor
-                                    )
-                                    span
-                                )
-                            ]
-                            struct_id: record_struct_id
-                            constructor: record_struct_constructor
-                        )
+                fields.push(
+                    .struct_value(
+                        struct_id: record_struct_id
+                        constructor: record_struct_constructor
+                        fields: [
+                            // name:
+                            .string_value(subject_enum.name, span)
+                            methods
+                            generic_parameters
+                            // record_type:
+                            .enum_value(
+                                enum_id: record_type_enum_id
+                                constructor: record_type_struct_constructor
+                                fields: [
+                                    // existing_id:
+                                    .optional_value(value: .reflect_id(enum_id, span), span)
+                                    // is_boxed:
+                                    .bool_value(subject_enum.is_boxed, span)
+                                    // variants:
+                                    .array_value_of_type(values: record_type_fields, type: .array_type_of_struct(field_struct_id), span)
+                                ]
+                                span
+                            )
+                        ]
                         span
                     )
-                ]
+                )
 
                 yield constructor!
             }
@@ -7822,7 +8107,6 @@ class Interpreter {
                     throw Error::from_string_literal("Invalid type")
                 }
 
-                fields = []
                 yield constructor!
             }
             else => {
@@ -7840,5 +8124,260 @@ class Interpreter {
         }
 
         return result
+    }
+
+    public fn synth_reflect_type(mut this, anon value: Value) throws -> Reflect::Type {
+        let (selected_variant_name, fields) = .find_reflected_primitive_enum_variant(primitive_name: "Type", value)
+        let existing_id = .optional_from_value(
+            fields[0]
+            &fn[this](anon value: Value) throws =>
+                .synth_reflect_id(value, &fn(id: usize, module_id: usize) =>
+                        Reflect::TypeId(id, module_id)
+                )
+        )
+        return match selected_variant_name {
+            "Void" => Reflect::Type::Void(existing_id)
+            "Bool" => Reflect::Type::Bool(existing_id)
+            "U8" => Reflect::Type::U8(existing_id)
+            "U16" => Reflect::Type::U16(existing_id)
+            "U32" => Reflect::Type::U32(existing_id)
+            "U64" => Reflect::Type::U64(existing_id)
+            "I8" => Reflect::Type::I8(existing_id)
+            "I16" => Reflect::Type::I16(existing_id)
+            "I32" => Reflect::Type::I32(existing_id)
+            "I64" => Reflect::Type::I64(existing_id)
+            "F32" => Reflect::Type::F32(existing_id)
+            "F64" => Reflect::Type::F64(existing_id)
+            "Usize" => Reflect::Type::Usize(existing_id)
+            "JaktString" => Reflect::Type::JaktString(existing_id)
+            "CChar" => Reflect::Type::CChar(existing_id)
+            "CInt" => Reflect::Type::CInt(existing_id)
+            "Unknown" => Reflect::Type::Unknown(existing_id)
+            "Never" => Reflect::Type::Never(existing_id)
+            "StructureOrEnum" => Reflect::Type::StructureOrEnum(existing_id, record: .synth_reflect_record(fields[1]))
+            "TypeVariable" => Reflect::Type::TypeVariable(existing_id, name: .string_from_value(fields[1]))
+            "RawPtr" => Reflect::Type::RawPtr(existing_id, type: .synth_reflect_type(fields[1]))
+            "Reference" => Reflect::Type::Reference(existing_id, type: .synth_reflect_type(fields[1]))
+            "MutableReference" => Reflect::Type::MutableReference(existing_id, type: .synth_reflect_type(fields[1]))
+            "Function" => Reflect::Type::Function(existing_id)
+
+            else => {
+                throw Error::from_string_literal("Invalid type")
+            }
+        }
+    }
+
+    fn synth_reflect_id<Id>(mut this, anon value: Value, anon make_id: &fn(id: usize, module_id: usize) -> Id) throws -> Id {
+        let fields = match value.impl {
+            Struct(fields) => fields
+            else => {
+                throw Error::from_string_literal("Invalid reflected id type")
+            }
+        }
+
+        let id = .usize_from_value(fields[0])
+        let module_id = .usize_from_value(fields[1])
+        return make_id(id, module_id)
+    }
+
+    fn synth_reflect_record(mut this, anon value: Value) throws -> Reflect::Record {
+        let fields = match value.impl {
+            Struct(fields) => fields
+            else => {
+                throw Error::from_string_literal("Invalid reflected record type")
+            }
+        }
+
+        let name = .string_from_value(fields[0])
+        let methods = .array_from_value(
+            fields[1]
+            &fn[this](anon value: Value) throws -> Reflect::Method => .synth_reflect_method(value)
+        )
+        let generic_mappings = .array_from_value(
+            fields[2]
+            &fn[this](anon value: Value) throws -> (String, Reflect::Type) {
+                let fields = match value.impl {
+                    JaktTuple(fields) => fields
+                    else => {
+                        throw Error::from_string_literal("Invalid reflected generic mapping type")
+                    }
+                }
+
+                return (.string_from_value(fields[0]), .synth_reflect_type(fields[1]))
+            }
+        )
+        let record_type = .synth_reflect_record_type(fields[3])
+        return Reflect::Record(name, methods, generic_mappings, record_type)
+    }
+
+    fn synth_reflect_record_type(mut this, anon value: Value) throws -> Reflect::RecordType {
+        let (selected_name, fields) = .find_reflected_primitive_enum_variant(primitive_name: "RecordType", value)
+        return match selected_name {
+            "Struct" => {
+                let existing_id = .optional_from_value(
+                    fields[0]
+                    &fn[this](anon value: Value) throws =>
+                        .synth_reflect_id(value, &fn(id: usize, module_id: usize) =>
+                                Reflect::StructId(id, module_id)
+                        )
+                )
+                let struct_fields = .array_from_value(fields[1], &fn[this](anon value: Value) throws => .synth_reflect_field(value))
+                yield Reflect::RecordType::Struct(existing_id, fields: struct_fields)
+            }
+            "Class" => {
+                let existing_id = .optional_from_value(
+                    fields[0]
+                    &fn[this](anon value: Value) throws =>
+                        .synth_reflect_id(value, &fn(id: usize, module_id: usize) =>
+                                Reflect::StructId(id, module_id)
+                        )
+                )
+                let struct_fields = .array_from_value(fields[1], &fn[this](anon value: Value) throws => .synth_reflect_field(value))
+                yield Reflect::RecordType::Class(existing_id, fields: struct_fields)
+            }
+            "SumEnum" => {
+                let existing_id = .optional_from_value(
+                    fields[0]
+                    &fn[this](anon value: Value) throws =>
+                        .synth_reflect_id(value, &fn(id: usize, module_id: usize) =>
+                                Reflect::EnumId(id, module_id)
+                        )
+                )
+                let is_boxed = .bool_from_value(fields[1])
+                let variants = .array_from_value(fields[2], &fn[this](anon value: Value) throws =>
+                    .synth_reflect_sum_enum_variant(value)
+                )
+                yield Reflect::RecordType::SumEnum(existing_id, is_boxed, variants)
+            }
+            else => {
+                throw Error::from_string_literal("Invalid reflected record type")
+            }
+        }
+    }
+
+    fn synth_reflect_sum_enum_variant(mut this, anon value: Value) throws -> Reflect::SumEnumVariant {
+        let (selected_name, fields) = .find_reflected_primitive_enum_variant(primitive_name: "SumEnumVariant", value)
+        return match selected_name {
+            "StructLike" => {
+                let name = .string_from_value(fields[0])
+                let struct_fields = .array_from_value(fields[1], &fn[this](anon value: Value) throws => .synth_reflect_field(value))
+                yield Reflect::SumEnumVariant::StructLike(name, fields: struct_fields)
+            }
+            "Typed" => {
+                let name = .string_from_value(fields[0])
+                let type = .synth_reflect_type(fields[1])
+                yield Reflect::SumEnumVariant::Typed(name, type)
+            }
+            "Untyped" => {
+                let name = .string_from_value(fields[0])
+                yield Reflect::SumEnumVariant::Untyped(name)
+            }
+            else => {
+                throw Error::from_string_literal("Invalid reflected sum enum variant type")
+            }
+        }
+    }
+
+    fn synth_reflect_field(mut this, anon value: Value) throws -> Reflect::Field {
+        let fields = match value.impl {
+            Struct(fields) => fields
+            else => {
+                throw Error::from_string_literal("Invalid reflected field type")
+            }
+        }
+
+        let variable = .synth_reflect_variable_declaration(fields[0])
+        let visibility = .synth_reflect_visibility(fields[1])
+        return Reflect::Field(variable, visibility)
+    }
+
+    fn synth_reflect_variable_declaration(mut this, anon value: Value) throws -> Reflect::VariableDeclaration {
+        let fields = match value.impl {
+            Struct(fields) => fields
+            else => {
+                throw Error::from_string_literal("Invalid reflected variable declaration type")
+            }
+        }
+
+        let name = .string_from_value(fields[0])
+        let type = .synth_reflect_type(fields[1])
+        let is_mutable = .bool_from_value(fields[2])
+        return Reflect::VariableDeclaration(name, type, is_mutable)
+    }
+
+    fn synth_reflect_method(mut this, anon value: Value) throws -> Reflect::Method {
+        let fields = match value.impl {
+            Struct(fields) => fields
+            else => {
+                throw Error::from_string_literal("Invalid reflected method type")
+            }
+        }
+
+        let function = .synth_reflect_function(fields[0])
+        let visibility = .synth_reflect_visibility(fields[1])
+        return Reflect::Method(function, visibility)
+    }
+
+    fn synth_reflect_function(mut this, anon value: Value) throws -> Reflect::Function {
+        let fields = match value.impl {
+            Struct(fields) => fields
+            else => {
+                throw Error::from_string_literal("Invalid reflected function type")
+            }
+        }
+
+        let name = .string_from_value(fields[0])
+        let generic_parameters = .array_from_value(
+            fields[1]
+            &fn[this](anon value: Value) throws -> String => .string_from_value(value)
+        )
+        let return_type = .synth_reflect_type(fields[2])
+        let can_throw = .bool_from_value(fields[3])
+        let is_comptime = .bool_from_value(fields[4])
+        return Reflect::Function(name, generic_parameters, return_type, can_throw, is_comptime)
+    }
+
+    fn synth_reflect_visibility(mut this, anon value: Value) throws -> Reflect::Visibility {
+        let (selected_name, fields) = .find_reflected_primitive_enum_variant(primitive_name: "Visibility", value)
+        return match selected_name {
+            "Public" => Reflect::Visibility::Public
+            "Private" => Reflect::Visibility::Private
+            else => {
+                throw Error::from_string_literal("Invalid visibility")
+            }
+        }
+    }
+
+    fn array_from_value<T>(mut this, anon value: Value, anon convert: &fn(anon value: Value) throws -> T) throws -> [T] {
+        let members = match value.impl {
+            JaktArray(values) => values
+            else => {
+                throw Error::from_string_literal("Invalid reflected array type")
+            }
+        }
+
+        mut result: [T] = []
+        for member in members {
+            result.push(convert(member))
+        }
+        return result
+    }
+
+    fn bool_from_value(mut this, anon value: Value) throws -> bool {
+        return match value.impl {
+            Bool(value) => value
+            else => {
+                throw Error::from_string_literal("Invalid reflected bool type")
+            }
+        }
+    }
+
+    fn optional_from_value<T>(mut this, anon value: Value, anon convert: &fn(anon value: Value) throws -> T) throws -> T? {
+        if value.impl is OptionalSome(value: x) {
+            let result: T? = convert(x)
+            return result
+        }
+
+        return None
     }
 }

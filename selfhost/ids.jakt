@@ -19,7 +19,7 @@ struct VarId {
     id: usize
 }
 
-struct FunctionId {
+struct FunctionId implements(Equal<FunctionId>) {
     module: ModuleId
     id: usize
 
@@ -44,7 +44,7 @@ struct StructId implements(Hashable, Equal<StructId>) {
     }
 }
 
-struct EnumId {
+struct EnumId implements(Equal<EnumId>) {
     module: ModuleId
     id: usize
 

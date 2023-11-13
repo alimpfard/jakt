@@ -9,9 +9,21 @@ import utility { FileId, IterationDecision, Queue, Span, join, panic, todo }
 import compiler { Compiler }
 import ids { EnumId, FunctionId, ModuleId, ScopeId, StructId, TraitId, TypeId, VarId }
 
-enum StructOrEnumId {
+enum StructOrEnumId implements(Equal<StructOrEnumId>) {
     Struct(StructId)
     Enum(EnumId)
+
+    [[inline(make_available)]]
+    fn equals(this, anon other: StructOrEnumId) -> bool => match this {
+        Struct(id) => match other {
+            Struct(other_id) => id.equals(other_id)
+            else => false
+        }
+        Enum(id) => match other {
+            Enum(other_id) => id.equals(other_id)
+            else => false
+        }
+    }
 }
 
 enum StructLikeId {
