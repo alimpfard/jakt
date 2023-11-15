@@ -1738,6 +1738,7 @@ class CheckedProgram {
     public compiler: Compiler
     public modules: [Module]
     public loaded_modules: [String: LoadedModule]
+    public root_scope_id: ScopeId? = None
 
     public fn create_module(mut this, name: String, is_root: bool, path: String? = None) throws -> ModuleId {
         let new_id = .modules.size()
@@ -2452,8 +2453,8 @@ class CheckedProgram {
     }
 
     public fn find_reflected_primitive(this, anon primitive: String) throws -> StructOrEnumId {
-        let scope_id = .prelude_scope_id()
-        let maybe_namespace = .find_namespace_in_scope(scope_id, "Reflect", ignore_mixin_scopes: true)
+        let scope_id = .root_scope_id!
+        let maybe_namespace = .find_namespace_in_scope(scope_id, "Reflect", ignore_mixin_scopes: false)
         if not maybe_namespace.has_value() {
             .compiler.panic(format("internal error: builtin namespace 'Reflect' not found"))
         }
@@ -3576,4 +3577,57 @@ fn comptime_format_impl(format_string: String, arguments: ArraySlice<Value>, pro
     }
 
     return builder.to_string()
+}
+
+fn dump_scope(anon scope_id: ScopeId, anon program: &CheckedProgram, indent: i64 = 0) throws {
+    mut scope = program.get_scope(scope_id)
+    eprintln("{: >{}}Scope (ns={}) {}", "", indent, scope.namespace_name, scope.debug_name)
+    let cindent = indent + 2
+    eprintln("{: >{}}Types:", "", cindent)
+    for (name, type_id) in scope.types {
+        let type = program.get_type(type_id)
+        eprintln("{: >{}}{}: {}", "", cindent + 2, name, program.type_name(type_id, debug_mode: true))
+    }
+    eprintln("{: >{}}Specializations:", "", cindent)
+    for (name, type) in scope.explicitly_specialized_types {
+        let type_name = program.type_name(type.type_id, debug_mode: true)
+        mut args = ""
+        for arg in type.arguments {
+            args = args + program.type_name(arg, debug_mode: true) + ", "
+        }
+
+        eprintln("{: >{}}{}<{}> = {}", "", cindent + 2, name, args, type_name)
+    }
+    eprintln("{: >{}}Variables:", "", cindent)
+    for (name, var_id) in scope.vars {
+        let var = program.get_variable(var_id)
+        eprintln("{: >{}}{}: {}", "", cindent + 2, name, program.type_name(var.type_id, debug_mode: true))
+    }
+    eprintln("{: >{}}Functions:", "", cindent)
+    for (name, ids) in scope.functions {
+        eprintln("{: >{}}{}:", "", cindent + 2, name)
+        for id in ids {
+            let function = program.get_function(id)
+            mut args = ""
+            for arg in function.params {
+                args = args + program.type_name(arg.variable.type_id, debug_mode: true) + ", "
+            }
+
+            eprintln("{: >{}}fn({}) -> {}", "", cindent + 4, args, program.type_name(function.return_type_id, debug_mode: true))
+        }
+    }
+    eprintln("{: >{}}Structs:", "", cindent)
+    for (name, id) in scope.structs {
+        let struct_ = program.get_struct(id)
+        eprintln("{: >{}}{}@{}: {}", "", cindent + 2, id.id, id.module, struct_.name)
+    }
+    eprintln("{: >{}}Aliases:", "", cindent)
+    for (name, id) in scope.aliases {
+        let scope = program.get_scope(id)
+        eprintln("{: >{}}{}: {}", "", cindent + 2, name, scope.debug_name)
+    }
+    eprintln("{: >{}}Children:", "", cindent)
+    for id in scope.children {
+        dump_scope(id, program, indent: cindent + 2)
+    }
 }

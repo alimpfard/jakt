@@ -216,6 +216,26 @@ struct Typechecker {
 
         let PRELUDE_SCOPE_ID: ScopeId = typechecker.prelude_scope_id()
         let root_scope_id = typechecker.create_scope(parent_scope_id: PRELUDE_SCOPE_ID, can_throw: false, debug_name: "root", for_block: false)
+        typechecker.program.root_scope_id = root_scope_id
+
+        // We use reflection in the prelude, so we need to import it first.
+        typechecker.typecheck_module_import(
+            import_: ParsedModuleImport(
+                module_name: ImportName::Literal(
+                    name: "jakt::prelude::reflection"
+                    span: Span(file_id: FileId(id: 0), start: 0, end: 0)
+                ),
+                alias_name: None
+                import_list: ImportList::List([
+                    ImportName::Literal(
+                        name: "Reflect"
+                        span: Span(file_id: FileId(id: 0), start: 0, end: 0)
+                    )
+                ])
+            )
+            scope_id: root_scope_id
+        )
+
         typechecker.typecheck_module_import(
             import_: ParsedModuleImport(
                 module_name: ImportName::Literal(
@@ -307,7 +327,7 @@ struct Typechecker {
         return Path::from_string(".")
     }
     fn prelude_scope_id(this) -> ScopeId => .program.prelude_scope_id()
-    fn root_scope_id(this) -> ScopeId => ScopeId(module_id: ModuleId(id: 1), id: 0)
+    fn root_scope_id(this) -> ScopeId => .program.root_scope_id!
 
     fn current_module(this) -> Module => .program.get_module(.current_module_id)
 
