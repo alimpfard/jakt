@@ -478,7 +478,7 @@ size_t const max_concurrent = (infallible_integer_cast<size_t>((({ Optional<u32>
 auto __jakt_var_962 = [&]() -> ErrorOr<u32> { return TRY((value_or_throw<u32>(((compiler_job_count).to_uint())))); }();
 if (__jakt_var_962.is_error()) {{
 warnln((StringView::from_string_literal("error: invalid value for --jobs: {}"sv)),compiler_job_count);
-return static_cast<i64>(1LL);
+return static_cast<int>(1);
 }
 } else {__jakt_var_961 = __jakt_var_962.release_value();
 }
@@ -486,13 +486,13 @@ __jakt_var_961.release_value(); }))));
 if (TRY((((args_parser).flag((TRY((DynamicArray<DeprecatedString>::create_with({TRY(DeprecatedString::from_utf8("--repl"sv))}))))))))){
 repl::REPL repl = TRY((repl::REPL::create(TRY((jakt__path::Path::from_parts((TRY((DynamicArray<DeprecatedString>::create_with({runtime_path, TRY(DeprecatedString::from_utf8("jaktlib"sv))}))))))),target_triple,user_configuration)));
 TRY((((repl).run())));
-return static_cast<i64>(0LL);
+return static_cast<int>(0);
 }
 JaktInternal::DynamicArray<DeprecatedString> const positional_arguments = TRY((((args_parser).remaining_arguments())));
 if (((project_name).has_value())){
 project::Project const project = project::Project((project_name.value()));
 TRY((((project).populate())));
-return static_cast<i64>(0LL);
+return static_cast<int>(0);
 }
 Function<ErrorOr<bool>(DeprecatedString)> const compiler_is = [cxx_compiler_path](DeprecatedString name) -> ErrorOr<bool> {
 {
@@ -523,7 +523,7 @@ continue;
 if ((!(interpret_run))){
 warnln((StringView::from_string_literal("Extra unknown argument '{}', you can only pass one source file (was '{}')"sv)),arg,file_name);
 warnln((StringView::from_string_literal("{}"sv)),TRY((usage())));
-return static_cast<i64>(1LL);
+return static_cast<int>(1);
 }
 TRY((((interpreted_main_arguments).push(arg))));
 }
@@ -534,7 +534,7 @@ TRY((((interpreted_main_arguments).push(arg))));
 if ((!(((file_name).has_value())))){
 warnln((StringView::from_string_literal("you must pass a source file"sv)));
 warnln((StringView::from_string_literal("{}"sv)),TRY((usage())));
-return static_cast<i64>(1LL);
+return static_cast<int>(1);
 }
 jakt__path::Path const file_path = TRY((jakt__path::Path::from_string((file_name.value()))));
 DeprecatedString const guessed_output_filename = TRY((((file_path).basename(true))));
@@ -556,12 +556,12 @@ jakt__path::Path directory_or_file_path = (_magic_value.value());
 utility::FileId const file_id = TRY((((compiler)->get_file_id_or_register(directory_or_file_path))));
 bool const file_is_set = TRY((((compiler)->set_current_file(file_id))));
 if ((!(file_is_set))){
-return static_cast<i64>(1LL);
+return static_cast<int>(1);
 }
 JaktInternal::Optional<FormatRange> const format_range = TRY((parse_format_range(input_format_range,((((compiler)->current_file_contents)).size()))));
 if ((!(((format_range).has_value())))){
 warnln((StringView::from_string_literal("invalid format range '{}', expected <start>(:<end>?)"sv)),input_format_range);
-return static_cast<i64>(1LL);
+return static_cast<int>(1);
 }
 JaktInternal::DynamicArray<lexer::Token> const tokens = TRY((lexer::Lexer::lex(compiler)));
 TRY((format_output(directory_or_file_path,tokens,format_range,format_debug,format_inplace)));
@@ -570,12 +570,12 @@ TRY((format_output(directory_or_file_path,tokens,format_range,format_debug,forma
 }
 }
 
-return static_cast<i64>(0LL);
+return static_cast<int>(0);
 }
 utility::FileId const main_file_id = TRY((((compiler)->get_file_id_or_register(file_path))));
 bool const file_is_set = TRY((((compiler)->set_current_file(main_file_id))));
 if ((!(file_is_set))){
-return static_cast<i64>(1LL);
+return static_cast<int>(1);
 }
 JaktInternal::DynamicArray<lexer::Token> const tokens = TRY((lexer::Lexer::lex(compiler)));
 if (lexer_debug){
@@ -618,7 +618,7 @@ TRY((((symbol_representations).push(TRY((((symbol).to_json())))))));
 }
 
 outln((StringView::from_string_literal("[{}]"sv)),TRY((utility::join(symbol_representations,TRY(DeprecatedString::from_utf8(","sv))))));
-return static_cast<i64>(0LL);
+return static_cast<int>(0);
 }
 typechecker::Typechecker typechecker = TRY((typechecker::Typechecker::typecheck(compiler,parsed_namespace)));
 NonnullRefPtr<types::CheckedProgram> const checked_program = ((typechecker).program);
@@ -687,7 +687,7 @@ break;
 
 if ((!(((main_function_id).has_value())))){
 warnln((StringView::from_string_literal("Error: No main function  found in program"sv)));
-return static_cast<i64>(1LL);
+return static_cast<int>(1);
 }
 JaktInternal::DynamicArray<types::ResolvedNamespace> const namespace_ = (TRY((DynamicArray<types::ResolvedNamespace>::create_with({}))));
 utility::Span const call_span = utility::Span(utility::FileId(static_cast<size_t>(0ULL)),static_cast<size_t>(0ULL),static_cast<size_t>(0ULL));
@@ -741,27 +741,27 @@ switch(__jakt_match_variant.__jakt_init_index()) {
 case 16 /* CInt */: {
 auto&& __jakt_match_value = __jakt_match_variant.as.CInt;int const& ret_val = __jakt_match_value.value;
 {
-return ret_val;
+return (infallible_integer_cast<int>((ret_val)));
 }
 return JaktInternal::ExplicitValue<void>();
 };/*case end*/
 case 9 /* I64 */: {
 auto&& __jakt_match_value = __jakt_match_variant.as.I64;i64 const& ret_val = __jakt_match_value.value;
 {
-return ret_val;
+return (infallible_integer_cast<int>((ret_val)));
 }
 return JaktInternal::ExplicitValue<void>();
 };/*case end*/
 case 0 /* Void */: {
 {
-return static_cast<i64>(0LL);
+return static_cast<int>(0);
 }
 return JaktInternal::ExplicitValue<void>();
 };/*case end*/
 default: {
 {
 warnln((StringView::from_string_literal("Error: Main function  must return an integer"sv)));
-return static_cast<i64>(1LL);
+return static_cast<int>(1);
 }
 return JaktInternal::ExplicitValue<void>();
 };/*case end*/
@@ -777,7 +777,7 @@ case 1 /* Throw */: {
 auto&& __jakt_match_value = __jakt_match_variant.as.Throw;types::Value const& x = __jakt_match_value.value;
 {
 warnln((StringView::from_string_literal("Error: Main function  threw: {}"sv)),TRY((repl::serialize_ast_node(TRY((interpreter::value_to_checked_expression(x,interpreter)))))));
-return static_cast<i64>(1LL);
+return static_cast<int>(1);
 }
 return JaktInternal::ExplicitValue<void>();
 };/*case end*/
@@ -800,7 +800,7 @@ JaktInternal::Optional<jakt__path::Path> const file_path = TRY((((compiler)->get
 outln((StringView::from_string_literal("{{\"start\": {}, \"end\": {}, \"file\": \"{}\"}}"sv)),((result).start),((result).end),TRY((utility::escape_for_quotes((((file_path.value())).to_string())))));
 }
 
-return static_cast<i64>(0LL);
+return static_cast<int>(0);
 }
 if (((goto_type_def).has_value())){
 size_t const index = (infallible_integer_cast<size_t>((((((goto_type_def.value())).to_uint()).value()))));
@@ -813,7 +813,7 @@ JaktInternal::Optional<jakt__path::Path> const file_path = TRY((((compiler)->get
 outln((StringView::from_string_literal("{{\"start\": {}, \"end\": {}, \"file\": \"{}\"}}"sv)),((result).start),((result).end),TRY((utility::escape_for_quotes((((file_path.value())).to_string())))));
 }
 
-return static_cast<i64>(0LL);
+return static_cast<int>(0);
 }
 if (((hover).has_value())){
 size_t const index = (infallible_integer_cast<size_t>((((((hover.value())).to_uint()).value()))));
@@ -821,7 +821,7 @@ JaktInternal::Optional<DeprecatedString> const result = TRY((ide::find_typename_
 if (((result).has_value())){
 outln((StringView::from_string_literal("{{\"hover\": \"{}\"}}"sv)),(result.value()));
 }
-return static_cast<i64>(0LL);
+return static_cast<int>(0);
 }
 if (((completions).has_value())){
 size_t const index = (infallible_integer_cast<size_t>((((((completions.value())).to_uint()).value()))));
@@ -851,17 +851,17 @@ out((StringView::from_string_literal("\"{}\""sv)),completion);
 }
 
 outln((StringView::from_string_literal("]}}"sv)));
-return static_cast<i64>(0LL);
+return static_cast<int>(0);
 }
 if (typechecker_debug){
 outln((StringView::from_string_literal("{:#}"sv)),checked_program);
 }
 TRY((((compiler)->print_errors())));
 if ((!(((((compiler)->errors)).is_empty())))){
-return static_cast<i64>(1LL);
+return static_cast<int>(1);
 }
 if (check_only){
-return static_cast<i64>(0LL);
+return static_cast<int>(0);
 }
 JaktInternal::Dictionary<DeprecatedString,JaktInternal::Tuple<DeprecatedString,DeprecatedString>> const codegen_result = TRY((codegen::CodeGenerator::generate(compiler,checked_program,codegen_debug)));
 if (discover_only){
@@ -892,7 +892,7 @@ outln((StringView::from_string_literal("{}:{}"sv)),((path).to_string()),module_f
 }
 }
 
-return static_cast<i64>(0LL);
+return static_cast<int>(0);
 }
 DeprecatedStringBuilder depfile_builder = DeprecatedStringBuilder::create();
 if (((generate_depfile).has_value())){
@@ -989,7 +989,7 @@ auto __jakt_var_965 = [&]() -> ErrorOr<void> { return TRY((utility::write_to_fil
 if (__jakt_var_965.is_error()) {auto error = __jakt_var_965.release_error();
 {
 warnln((StringView::from_string_literal("Error: Could not write to file: {} ({})"sv)),file,error);
-return static_cast<i64>(1LL);
+return static_cast<int>(1);
 }
 }
 ;
@@ -1006,7 +1006,7 @@ TRY((utility::write_to_file(TRY((((depfile_builder).to_string()))),(generate_dep
 ;return {};}();
 if (__jakt_var_966.is_error()) {auto error = __jakt_var_966.release_error();{
 warnln((StringView::from_string_literal("Error: Could not write to file list ({})"sv)),error);
-return static_cast<i64>(1LL);
+return static_cast<int>(1);
 }
 };
 }
@@ -1118,7 +1118,7 @@ return TRY((platform__unknown_compiler::run_compiler(cxx_compiler_path,input_fil
 }
 )))))), ErrorOr<void>{}; }();
 if (__jakt_var_968.is_error()) {{
-return static_cast<i64>(1LL);
+return static_cast<int>(1);
 }
 }
 ;
@@ -1146,7 +1146,7 @@ TRY((((extra_arguments).push(((TRY((((runtime_lib_path).join(TRY((platform::libr
 }
 auto __jakt_var_970 = [&]() -> ErrorOr<void> { return TRY((((builder).link_into_archive(TRY((archiver_path.try_value_or_lazy_evaluated([&]() -> ErrorOr<DeprecatedString> { return TRY(DeprecatedString::from_utf8("ar"sv)); }))),((TRY((((binary_dir).join((link_archive.value())))))).to_string()),extra_arguments)))), ErrorOr<void>{}; }();
 if (__jakt_var_970.is_error()) {{
-return static_cast<i64>(1LL);
+return static_cast<int>(1);
 }
 }
 ;
@@ -1234,7 +1234,7 @@ TRY((((extra_arguments).push(TRY((__jakt_format((StringView::from_string_literal
 
 auto __jakt_var_972 = [&]() -> ErrorOr<void> { return TRY((((builder).link_into_executable(cxx_compiler_path,output_filename,extra_arguments)))), ErrorOr<void>{}; }();
 if (__jakt_var_972.is_error()) {{
-return static_cast<i64>(1LL);
+return static_cast<int>(1);
 }
 }
 ;
@@ -1244,7 +1244,7 @@ return static_cast<i64>(1LL);
 if (run_executable){
 return system(((output_filename).characters()));
 }
-return static_cast<i64>(0LL);
+return static_cast<int>(0);
 }
 }
 
@@ -1270,7 +1270,7 @@ TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
 }
 return {};
 }
-(output,TRY(DeprecatedString::from_utf8("FLAGS:\n"sv)))));
+(output,TRY(DeprecatedString::from_utf8("= General:\n"sv)))));
 TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
 {
 (self = TRY((((self) + (rhs)))));
@@ -1284,7 +1284,182 @@ TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
 }
 return {};
 }
+(output,TRY(DeprecatedString::from_utf8("  -v,--version\t\t\t\tPrint the compiler's version and exit.\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("  -cr,--compile-run\t\t\tBuild and run an executable file.\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("  -r,--run\t\t\t\tRun the given file without compiling it (all positional arguments after the file name will be passed to main).\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("  --repl\t\t\t\tStart a Read-Eval-Print loop session.\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("  --create NAME\t\t\t\tCreate sample project in $PWD/NAME\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("= Compilation:\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("  --config KEY=VALUE\t\t\tSet a user configuration value.\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("  -c,--check-only\t\t\tOnly check the code for errors.\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("  -d\t\t\t\t\tInsert debug statement spans in generated C++ code.\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
 (output,TRY(DeprecatedString::from_utf8("  -O\t\t\t\t\tBuild an optimized executable.\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("  -S,--emit-cpp-source-only\t\tOnly output source (do not build).\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("  --ak-is-my-only-stdlib\t\tForget about interop, AK is the one and only STL.\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("  --cxx-compiler-path PATH\t\tPath of the C++ compiler to use when compiling the generated sources.\n\t\t\t\t\tDefaults to clang++.\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("  -M,--dep-file FILE\t\t\tEmit a depfile listing dependencies of the main output.\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("  --extra-cpp-flagFLAG\t\t\tPass FLAG to the compiler. Can be specified multiple times.\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("  --use-ccache\t\t\t\tUse ccache when compiling.\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("  -o,--output-filename FILE\t\tName of the output binary.\n\t\t\t\t\tDefaults to the input-filename without the extension.\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("  -B,--binary-dir PATH\t\t\tOutput directory for compiled files.\n\t\t\t\t\tDefaults to $PWD/build.\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("  -I PATH\t\t\t\tAdd PATH to compiler's include list. Can be specified multiple times.\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("  -J,--jobs NUMBER\t\t\tSpecify the number of jobs to run in parallel, defaults to 2 (1 on windows).\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("  -L PATH\t\t\t\tAdd PATH to linker's search list. Can be specified multiple times.\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("  -l,--link-with LIB\t\t\tLink executable with LIB. Can be specified multiple times.\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("  -T,--target-triple TARGET\t\tSpecify the target triple used for the build, defaults to native.\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("  -WlARG\t\t\t\tPass ARG to the linker. Can be specified multiple times.\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("  -X FILE\t\t\t\tPass FILE to the compiler. Can be specified multiple times.\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("= Debugging:\n"sv)))));
 TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
 {
 (self = TRY((((self) + (rhs)))));
@@ -1312,35 +1487,7 @@ TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
 }
 return {};
 }
-(output,TRY(DeprecatedString::from_utf8("  -S,--emit-cpp-source-only\t\tOnly output source (do not build).\n"sv)))));
-TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
-{
-(self = TRY((((self) + (rhs)))));
-}
-return {};
-}
-(output,TRY(DeprecatedString::from_utf8("  -cr,--compile-run\t\t\tBuild and run an executable file.\n"sv)))));
-TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
-{
-(self = TRY((((self) + (rhs)))));
-}
-return {};
-}
-(output,TRY(DeprecatedString::from_utf8("  -r,--run\t\t\t\tRun the given file without compiling it (all positional arguments after the file name will be passed to main).\n"sv)))));
-TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
-{
-(self = TRY((((self) + (rhs)))));
-}
-return {};
-}
-(output,TRY(DeprecatedString::from_utf8("  -d\t\t\t\t\tInsert debug statement spans in generated C++ code.\n"sv)))));
-TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
-{
-(self = TRY((((self) + (rhs)))));
-}
-return {};
-}
-(output,TRY(DeprecatedString::from_utf8("  --debug-print\t\t\t\tOutput debug print.\n"sv)))));
+(output,TRY(DeprecatedString::from_utf8("  -fd,--format-debug\t\t\tOutput debug info for the formatter.\n"sv)))));
 TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
 {
 (self = TRY((((self) + (rhs)))));
@@ -1354,21 +1501,28 @@ TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
 }
 return {};
 }
-(output,TRY(DeprecatedString::from_utf8("  -c,--check-only\t\t\tOnly check the code for errors.\n"sv)))));
+(output,TRY(DeprecatedString::from_utf8("  -D,--dot-clang-format-path PATH\tPath to the .clang-format file to use.\n\t\t\t\t\tDefaults to none, invoking clangs default .clang-format file handling.\n"sv)))));
 TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
 {
 (self = TRY((((self) + (rhs)))));
 }
 return {};
 }
-(output,TRY(DeprecatedString::from_utf8("  -j,--json-errors\t\t\tEmit machine-readable (JSON) errors.\n"sv)))));
+(output,TRY(DeprecatedString::from_utf8("  -F,--clang-format-path PATH\t\tPath to clang-format executable.\n\t\t\t\t\tDefaults to clang-format\n"sv)))));
 TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
 {
 (self = TRY((((self) + (rhs)))));
 }
 return {};
 }
-(output,TRY(DeprecatedString::from_utf8("  -H,--type-hints\t\t\tEmit machine-readable type hints (for IDE integration).\n"sv)))));
+(output,TRY(DeprecatedString::from_utf8("  --debug-print\t\t\t\tOutput debug print.\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("= Formatting:\n"sv)))));
 TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
 {
 (self = TRY((((self) + (rhs)))));
@@ -1389,161 +1543,14 @@ TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
 }
 return {};
 }
-(output,TRY(DeprecatedString::from_utf8("  -fd,--format-debug\t\t\tOutput debug info for the formatter.\n"sv)))));
+(output,TRY(DeprecatedString::from_utf8("  -fr,--format-range RANGE\t\tEmit part of the document with formatting applied.\n"sv)))));
 TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
 {
 (self = TRY((((self) + (rhs)))));
 }
 return {};
 }
-(output,TRY(DeprecatedString::from_utf8("  -fr,--format-range\t\t\tEmit part of the document with formatting applied.\n"sv)))));
-TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
-{
-(self = TRY((((self) + (rhs)))));
-}
-return {};
-}
-(output,TRY(DeprecatedString::from_utf8("  --try-hints\t\t\t\tEmit machine-readable try hints (for IDE integration).\n"sv)))));
-TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
-{
-(self = TRY((((self) + (rhs)))));
-}
-return {};
-}
-(output,TRY(DeprecatedString::from_utf8("  --repl\t\t\t\tStart a Read-Eval-Print loop session.\n"sv)))));
-TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
-{
-(self = TRY((((self) + (rhs)))));
-}
-return {};
-}
-(output,TRY(DeprecatedString::from_utf8("  --print-symbols\t\t\tEmit a machine-readable (JSON) symbol tree.\n"sv)))));
-TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
-{
-(self = TRY((((self) + (rhs)))));
-}
-return {};
-}
-(output,TRY(DeprecatedString::from_utf8("  --use-ccache\t\t\t\tUse ccache when compiling.\n"sv)))));
-TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
-{
-(self = TRY((((self) + (rhs)))));
-}
-return {};
-}
-(output,TRY(DeprecatedString::from_utf8("  --discover\t\t\t\tDiscover all files in the project, print the dependencies and outputs, then exit.\n"sv)))));
-TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
-{
-(self = TRY((((self) + (rhs)))));
-}
-return {};
-}
-(output,TRY(DeprecatedString::from_utf8("  --ak-is-my-only-stdlib\t\tForget about interop, AK is the one and only STL.\n"sv)))));
-TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
-{
-(self = TRY((((self) + (rhs)))));
-}
-return {};
-}
-(output,TRY(DeprecatedString::from_utf8("\nOptions:\n"sv)))));
-TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
-{
-(self = TRY((((self) + (rhs)))));
-}
-return {};
-}
-(output,TRY(DeprecatedString::from_utf8("  -T,--target-triple TARGET\t\tSpecify the target triple used for the build, defaults to native.\n"sv)))));
-TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
-{
-(self = TRY((((self) + (rhs)))));
-}
-return {};
-}
-(output,TRY(DeprecatedString::from_utf8("  --runtime-library-path PATH\t\tSpecify the path to the runtime library.\n"sv)))));
-TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
-{
-(self = TRY((((self) + (rhs)))));
-}
-return {};
-}
-(output,TRY(DeprecatedString::from_utf8("  -J,--jobs NUMBER\t\t\tSpecify the number of jobs to run in parallel, defaults to 2 (1 on windows).\n"sv)))));
-TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
-{
-(self = TRY((((self) + (rhs)))));
-}
-return {};
-}
-(output,TRY(DeprecatedString::from_utf8("  -F,--clang-format-path PATH\t\tPath to clang-format executable.\n\t\t\t\t\tDefaults to clang-format\n"sv)))));
-TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
-{
-(self = TRY((((self) + (rhs)))));
-}
-return {};
-}
-(output,TRY(DeprecatedString::from_utf8("  -D,--dot-clang-format-path PATH\tPath to the .clang-format file to use.\n\t\t\t\t\tDefaults to none, invoking clangs default .clang-format file handling.\n"sv)))));
-TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
-{
-(self = TRY((((self) + (rhs)))));
-}
-return {};
-}
-(output,TRY(DeprecatedString::from_utf8("  -R,--runtime-path PATH\t\tPath of the Jakt runtime headers.\n\t\t\t\t\tDefaults to $PWD/runtime.\n"sv)))));
-TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
-{
-(self = TRY((((self) + (rhs)))));
-}
-return {};
-}
-(output,TRY(DeprecatedString::from_utf8("  -B,--binary-dir PATH\t\t\tOutput directory for compiled files.\n\t\t\t\t\tDefaults to $PWD/build.\n"sv)))));
-TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
-{
-(self = TRY((((self) + (rhs)))));
-}
-return {};
-}
-(output,TRY(DeprecatedString::from_utf8("  -C,--cxx-compiler-path PATH\t\tPath of the C++ compiler to use when compiling the generated sources.\n\t\t\t\t\tDefaults to clang++.\n"sv)))));
-TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
-{
-(self = TRY((((self) + (rhs)))));
-}
-return {};
-}
-(output,TRY(DeprecatedString::from_utf8("  -I PATH\t\t\t\tAdd PATH to compiler's include list. Can be specified multiple times.\n"sv)))));
-TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
-{
-(self = TRY((((self) + (rhs)))));
-}
-return {};
-}
-(output,TRY(DeprecatedString::from_utf8("  -L PATH\t\t\t\tAdd PATH to linker's search list. Can be specified multiple times.\n"sv)))));
-TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
-{
-(self = TRY((((self) + (rhs)))));
-}
-return {};
-}
-(output,TRY(DeprecatedString::from_utf8("  -l,--link-with LIB\t\t\tLink executable with LIB. Can be specified multiple times.\n"sv)))));
-TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
-{
-(self = TRY((((self) + (rhs)))));
-}
-return {};
-}
-(output,TRY(DeprecatedString::from_utf8("  -o,--output-filename FILE\t\tName of the output binary.\n\t\t\t\t\tDefaults to the input-filename without the extension.\n"sv)))));
-TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
-{
-(self = TRY((((self) + (rhs)))));
-}
-return {};
-}
-(output,TRY(DeprecatedString::from_utf8("  -g,--goto-def INDEX\t\t\tReturn the span for the definition at index.\n"sv)))));
-TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
-{
-(self = TRY((((self) + (rhs)))));
-}
-return {};
-}
-(output,TRY(DeprecatedString::from_utf8("  -t,--goto-type-def INDEX\t\tReturn the span for the type definition at index.\n"sv)))));
+(output,TRY(DeprecatedString::from_utf8("= IDE integration:\n"sv)))));
 TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
 {
 (self = TRY((((self) + (rhs)))));
@@ -1557,6 +1564,20 @@ TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
 }
 return {};
 }
+(output,TRY(DeprecatedString::from_utf8("  -g,--goto-def INDEX\t\t\tReturn the span for the definition at index.\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("  -H,--type-hints\t\t\tEmit machine-readable type hints (for IDE integration).\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
 (output,TRY(DeprecatedString::from_utf8("  -m,--completions INDEX\t\tReturn dot completions at index.\n"sv)))));
 TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
 {
@@ -1564,7 +1585,63 @@ TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
 }
 return {};
 }
-(output,TRY(DeprecatedString::from_utf8("  --create NAME\t\t\t\tCreate sample project in $PWD/NAME\n"sv)))));
+(output,TRY(DeprecatedString::from_utf8("  --print-symbols\t\t\tEmit a machine-readable (JSON) symbol tree.\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("  --try-hints\t\t\t\tEmit machine-readable try hints (for IDE integration).\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("  -t,--goto-type-def INDEX\t\tReturn the span for the type definition at index.\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("= Misc:\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("  --discover\t\t\t\tDiscover all files in the project, print the dependencies and outputs, then exit.\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("  -j,--json-errors\t\t\tEmit machine-readable (JSON) errors.\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("  --runtime-library-path PATH\t\tSpecify the path to the runtime library.\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("  --runtime-path PATH\t\t\tSpecify the path to the host runtime headers.\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,TRY(DeprecatedString::from_utf8("  -R,--runtime-path PATH\t\tPath of the Jakt runtime headers.\n\t\t\t\t\tDefaults to $PWD/runtime.\n"sv)))));
 TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
 {
 (self = TRY((((self) + (rhs)))));
@@ -1578,28 +1655,14 @@ TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
 }
 return {};
 }
-(output,TRY(DeprecatedString::from_utf8("  Flags and options not listed below will be passed verbatim to the underlying `jakt' invocation.\n"sv)))));
+(output,TRY(DeprecatedString::from_utf8("All other given options and flags will be passed to the compiler invocation verbatim.\n"sv)))));
 TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
 {
 (self = TRY((((self) + (rhs)))));
 }
 return {};
 }
-(output,TRY(DeprecatedString::from_utf8("FLAGS:\n"sv)))));
-TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
-{
-(self = TRY((((self) + (rhs)))));
-}
-return {};
-}
-(output,TRY(DeprecatedString::from_utf8("  --only-support-libs\t\t\tOnly build and install support libraries for the target platform.\n"sv)))));
-TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
-{
-(self = TRY((((self) + (rhs)))));
-}
-return {};
-}
-(output,TRY(DeprecatedString::from_utf8("\nOPTIONS:\n"sv)))));
+(output,TRY(DeprecatedString::from_utf8("  --source-file PATH\t\t\tSpecify the path to the source file to compile.\n"sv)))));
 TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
 {
 (self = TRY((((self) + (rhs)))));
@@ -1620,14 +1683,14 @@ TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
 }
 return {};
 }
-(output,TRY(DeprecatedString::from_utf8("  --system-lib-dir PATH\t\t\tSpecify a system library directory to use.\n"sv)))));
+(output,TRY(DeprecatedString::from_utf8("  --system-include-dir PATH\t\tSpecify a system include directory to use.\n"sv)))));
 TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
 {
 (self = TRY((((self) + (rhs)))));
 }
 return {};
 }
-(output,TRY(DeprecatedString::from_utf8("  --system-include-dir PATH\t\tSpecify a system include directory to use.\n"sv)))));
+(output,TRY(DeprecatedString::from_utf8("  --system-lib-dir PATH\t\t\tSpecify a system library directory to use.\n"sv)))));
 TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
 {
 (self = TRY((((self) + (rhs)))));
@@ -1655,28 +1718,14 @@ TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
 }
 return {};
 }
+(output,TRY(DeprecatedString::from_utf8("  --only-support-libs\t\t\tOnly build and install support libraries for the target platform.\n"sv)))));
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
 (output,TRY(DeprecatedString::from_utf8("  --runtime-lib-path PATH\t\tSpecify the path to the host runtime library.\n"sv)))));
-TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
-{
-(self = TRY((((self) + (rhs)))));
-}
-return {};
-}
-(output,TRY(DeprecatedString::from_utf8("  --runtime-path PATH\t\t\tSpecify the path to the host runtime headers.\n"sv)))));
-TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
-{
-(self = TRY((((self) + (rhs)))));
-}
-return {};
-}
-(output,TRY(DeprecatedString::from_utf8("  --source-file PATH\t\t\tSpecify the path to the source file to compile.\n"sv)))));
-TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
-{
-(self = TRY((((self) + (rhs)))));
-}
-return {};
-}
-(output,TRY(DeprecatedString::from_utf8("  -o,--output-filename FILE\t\tName of the output binary.\n"sv)))));
 return output;
 }
 }

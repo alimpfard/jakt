@@ -9,6 +9,24 @@ const unsigned int CP_UTF8 = 65001;
 #include <stdio.h>
 #include <AK/Queue.h>
 namespace Jakt {
+namespace jakt__prelude__reflection {
+namespace Reflect {
+struct Span;
+struct VariableDeclaration;
+struct Field;
+struct Method;
+struct Record;
+struct Function;
+struct Type;
+
+struct RecordType;
+
+struct Visibility;
+
+struct SumEnumVariant;
+
+}
+}
 namespace jakt__prelude__static_array {
 }
 namespace jakt__prelude__iteration {
@@ -19,6 +37,8 @@ namespace jakt__prelude__operators {
 enum class Ordering: u8;
 }
 namespace jakt__prelude__hash {
+}
+namespace jakt__prelude__class_name {
 }
 namespace jakt__prelude__prelude {
 }
@@ -324,6 +344,8 @@ ErrorOr<DeprecatedString> comptime_format_impl(DeprecatedString const format_str
 ids::TypeId builtin(types::BuiltinType const builtin);
 
 ids::TypeId void_type_id();
+
+ErrorOr<void> dump_scope(ids::ScopeId const scope_id, NonnullRefPtr<types::CheckedProgram> const& program, i64 const indent);
 
 ids::TypeId unknown_type_id();
 

@@ -282,6 +282,10 @@
 #    define LZMA_DEBUG 0
 #endif
 
+#ifndef LZW_DEBUG
+#    define LZW_DEBUG 0
+#endif
+
 #ifndef MALLOC_DEBUG
 #    define MALLOC_DEBUG 0
 #endif
@@ -456,6 +460,10 @@
 
 #ifndef TEXTEDITOR_DEBUG
 #    define TEXTEDITOR_DEBUG 0
+#endif
+
+#ifndef TIFF_DEBUG
+#    define TIFF_DEBUG 0
 #endif
 
 #ifndef TIME_ZONE_DEBUG

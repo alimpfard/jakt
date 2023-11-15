@@ -43,13 +43,14 @@ TRY(JaktInternal::PrettyPrint::output_indentation(builder));TRY(builder.appendff
 TRY(JaktInternal::PrettyPrint::output_indentation(builder));TRY(builder.appendff("is_fat_arrow: {}, ", is_fat_arrow));
 TRY(JaktInternal::PrettyPrint::output_indentation(builder));TRY(builder.appendff("is_unsafe: {}, ", is_unsafe));
 TRY(JaktInternal::PrettyPrint::output_indentation(builder));TRY(builder.appendff("has_varargs: {}, ", has_varargs));
+TRY(JaktInternal::PrettyPrint::output_indentation(builder));TRY(builder.appendff("is_jakt_main: {}, ", is_jakt_main));
 TRY(JaktInternal::PrettyPrint::output_indentation(builder));TRY(builder.appendff("external_name: {}, ", external_name));
 TRY(JaktInternal::PrettyPrint::output_indentation(builder));TRY(builder.appendff("deprecated_message: {}, ", deprecated_message));
 TRY(JaktInternal::PrettyPrint::output_indentation(builder));TRY(builder.appendff("stores_arguments: {}, ", stores_arguments));
 TRY(JaktInternal::PrettyPrint::output_indentation(builder));TRY(builder.appendff("force_inline: {}", force_inline));
 }
 TRY(builder.append(")"sv));return builder.to_string(); }
-parser::ParsedFunction::ParsedFunction(size_t a_id, DeprecatedString a_name, utility::Span a_name_span, parser::Visibility a_visibility, JaktInternal::DynamicArray<parser::ParsedParameter> a_params, JaktInternal::DynamicArray<parser::ParsedGenericParameter> a_generic_parameters, parser::ParsedBlock a_block, NonnullRefPtr<typename parser::ParsedType> a_return_type, utility::Span a_return_type_span, bool a_can_throw, parser::FunctionType a_type, parser::FunctionLinkage a_linkage, bool a_must_instantiate, bool a_is_comptime, bool a_is_fat_arrow, bool a_is_unsafe, bool a_has_varargs, JaktInternal::Optional<parser::ExternalName> a_external_name, JaktInternal::Optional<DeprecatedString> a_deprecated_message, JaktInternal::Optional<JaktInternal::DynamicArray<JaktInternal::Tuple<size_t,parser::ArgumentStoreLevel>>> a_stores_arguments, parser::InlineState a_force_inline): id(move(a_id)), name(move(a_name)), name_span(move(a_name_span)), visibility(move(a_visibility)), params(move(a_params)), generic_parameters(move(a_generic_parameters)), block(move(a_block)), return_type(move(a_return_type)), return_type_span(move(a_return_type_span)), can_throw(move(a_can_throw)), type(move(a_type)), linkage(move(a_linkage)), must_instantiate(move(a_must_instantiate)), is_comptime(move(a_is_comptime)), is_fat_arrow(move(a_is_fat_arrow)), is_unsafe(move(a_is_unsafe)), has_varargs(move(a_has_varargs)), external_name(move(a_external_name)), deprecated_message(move(a_deprecated_message)), stores_arguments(move(a_stores_arguments)), force_inline(move(a_force_inline)){}
+parser::ParsedFunction::ParsedFunction(size_t a_id, DeprecatedString a_name, utility::Span a_name_span, parser::Visibility a_visibility, JaktInternal::DynamicArray<parser::ParsedParameter> a_params, JaktInternal::DynamicArray<parser::ParsedGenericParameter> a_generic_parameters, parser::ParsedBlock a_block, NonnullRefPtr<typename parser::ParsedType> a_return_type, utility::Span a_return_type_span, bool a_can_throw, parser::FunctionType a_type, parser::FunctionLinkage a_linkage, bool a_must_instantiate, bool a_is_comptime, bool a_is_fat_arrow, bool a_is_unsafe, bool a_has_varargs, bool a_is_jakt_main, JaktInternal::Optional<parser::ExternalName> a_external_name, JaktInternal::Optional<DeprecatedString> a_deprecated_message, JaktInternal::Optional<JaktInternal::DynamicArray<JaktInternal::Tuple<size_t,parser::ArgumentStoreLevel>>> a_stores_arguments, parser::InlineState a_force_inline): id(move(a_id)), name(move(a_name)), name_span(move(a_name_span)), visibility(move(a_visibility)), params(move(a_params)), generic_parameters(move(a_generic_parameters)), block(move(a_block)), return_type(move(a_return_type)), return_type_span(move(a_return_type_span)), can_throw(move(a_can_throw)), type(move(a_type)), linkage(move(a_linkage)), must_instantiate(move(a_must_instantiate)), is_comptime(move(a_is_comptime)), is_fat_arrow(move(a_is_fat_arrow)), is_unsafe(move(a_is_unsafe)), has_varargs(move(a_has_varargs)), is_jakt_main(move(a_is_jakt_main)), external_name(move(a_external_name)), deprecated_message(move(a_deprecated_message)), stores_arguments(move(a_stores_arguments)), force_inline(move(a_force_inline)){}
 
 bool parser::ParsedFunction::equals(parser::ParsedFunction const other,bool const ignore_block) const {
 {
@@ -4626,7 +4627,7 @@ __jakt_label_46:; __jakt_var_50.release_value(); }));
 
 ErrorOr<parser::ParsedFunction> parser::Parser::parse_function(parser::FunctionLinkage const linkage,parser::Visibility const visibility,bool const is_comptime,bool const is_destructor,bool const is_unsafe,bool const allow_missing_body) {
 {
-parser::ParsedFunction parsed_function = parser::ParsedFunction(((((*this).next_function_id)++)),TRY(DeprecatedString::from_utf8(""sv)),((*this).empty_span()),visibility,(TRY((DynamicArray<parser::ParsedParameter>::create_with({})))),(TRY((DynamicArray<parser::ParsedGenericParameter>::create_with({})))),parser::ParsedBlock((TRY((DynamicArray<NonnullRefPtr<typename parser::ParsedStatement>>::create_with({}))))),TRY((parser::ParsedType::Empty(JaktInternal::OptionalNone()))),((*this).span(static_cast<size_t>(0ULL),static_cast<size_t>(0ULL))),false,parser::FunctionType::Normal(),linkage,false,is_comptime,false,is_unsafe,false,JaktInternal::OptionalNone(),JaktInternal::OptionalNone(),JaktInternal::OptionalNone(),parser::InlineState::Default());
+parser::ParsedFunction parsed_function = parser::ParsedFunction(((((*this).next_function_id)++)),TRY(DeprecatedString::from_utf8(""sv)),((*this).empty_span()),visibility,(TRY((DynamicArray<parser::ParsedParameter>::create_with({})))),(TRY((DynamicArray<parser::ParsedGenericParameter>::create_with({})))),parser::ParsedBlock((TRY((DynamicArray<NonnullRefPtr<typename parser::ParsedStatement>>::create_with({}))))),TRY((parser::ParsedType::Empty(JaktInternal::OptionalNone()))),((*this).span(static_cast<size_t>(0ULL),static_cast<size_t>(0ULL))),false,parser::FunctionType::Normal(),linkage,false,is_comptime,false,is_unsafe,false,false,JaktInternal::OptionalNone(),JaktInternal::OptionalNone(),JaktInternal::OptionalNone(),parser::InlineState::Default());
 if (is_destructor){
 (((parsed_function).type) = parser::FunctionType::Destructor());
 TRY((((((parsed_function).params)).push(parser::ParsedParameter(false,parser::ParsedVariable(TRY(DeprecatedString::from_utf8("this"sv)),TRY((parser::ParsedType::Empty(JaktInternal::OptionalNone()))),true,((((*this).current())).span())),JaktInternal::OptionalNone(),((((*this).current())).span()))))));
@@ -4667,7 +4668,8 @@ parser::ParsedFunctionParameters const fn_parameters = TRY((((*this).parse_funct
 (((parsed_function).params) = ((fn_parameters).parameters));
 (((parsed_function).has_varargs) = ((fn_parameters).has_varargs));
 }
-bool can_throw = ((((parsed_function).name)) == (TRY(DeprecatedString::from_utf8("main"sv))));
+(((parsed_function).is_jakt_main) = ((((parsed_function).name)) == (TRY(DeprecatedString::from_utf8("main"sv)))));
+bool can_throw = ((parsed_function).is_jakt_main);
 if (((((*this).current())).__jakt_init_index() == 99 /* Throws */)){
 if (is_destructor){
 TRY((((*this).error(TRY(DeprecatedString::from_utf8("Destructor cannot throw"sv)),((((*this).current())).span())))));
@@ -4686,6 +4688,9 @@ utility::Span const start = ((((*this).current())).span());
 (((parsed_function).return_type_span) = TRY((parser::merge_spans(start,((((*this).previous())).span())))));
 }
 else {
+if (((parsed_function).is_jakt_main)){
+(((parsed_function).return_type) = TRY((parser::ParsedType::Name(JaktInternal::OptionalNone(),TRY(DeprecatedString::from_utf8("c_int"sv)),((((*this).previous())).span())))));
+}
 (((parsed_function).return_type_span) = ((((*this).previous())).span()));
 }
 

@@ -1,4 +1,4 @@
-#include "jakt__libc__io.h"
+#include "jakt__prelude__reflection.h"
 #include "main.h"
 #include "platform__unknown_compiler.h"
 #include "repl.h"
@@ -40,6 +40,8 @@
 #include "jakt__prelude__static_array.h"
 #include "jakt__prelude__reflection.h"
 namespace Jakt {
-namespace jakt__libc__io {
+namespace jakt__prelude__reflection {
+namespace Reflect {
+}
 }
 } // namespace Jakt

@@ -2127,7 +2127,7 @@ return JaktInternal::ExplicitValue(({ Optional<JaktInternal::Optional<ide::Usage
 if ((((var_span).contains(span)) && (!(((namespaces).is_empty()))))){
 types::CheckedNamespace const last_ns = (((namespaces).last()).value());
 if (((((TRY((((program)->get_scope(((last_ns).scope))))))->namespace_name)).has_value())){
-JaktInternal::Optional<ids::EnumId> const enum_id = TRY((((program)->find_enum_in_scope(((last_ns).scope),((last_ns).name),false,false))));
+JaktInternal::Optional<ids::EnumId> const enum_id = TRY((((program)->find_enum_in_scope(((last_ns).scope),((last_ns).name),false,JaktInternal::OptionalNone()))));
 if (((enum_id).has_value())){
 types::CheckedEnum const enum_ = ((program)->get_enum((enum_id.value())));
 return static_cast<JaktInternal::Optional<ide::Usage>>(TRY((ide::get_enum_variant_usage_from_type_id_and_name(program,((enum_).type_id),((var)->name)))));
@@ -2382,9 +2382,7 @@ TRY((((symbols).push_values(((TRY((ide::find_symbols_in_namespace(sub_namespace)
 }
 }
 
-if ((!(((((namespace_).name_span)).has_value())))){
-return symbols;
-}
+if ((((((namespace_).name_span)).has_value()) && ((((namespace_).name)).has_value()))){
 utility::Span namespace_span = (((namespace_).name_span).value());
 {
 JaktInternal::ArrayIterator<ide::JaktSymbol> _magic = ((symbols).iterator());
@@ -2402,6 +2400,11 @@ ide::JaktSymbol child = (_magic_value.value());
 }
 
 return (TRY((DynamicArray<ide::JaktSymbol>::create_with({ide::JaktSymbol((((namespace_).name).value()),JaktInternal::OptionalNone(),TRY(DeprecatedString::from_utf8("namespace"sv)),namespace_span,(((namespace_).name_span).value()),symbols)}))));
+}
+else {
+return symbols;
+}
+
 }
 }
 

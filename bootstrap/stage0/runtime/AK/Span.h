@@ -276,6 +276,12 @@ public:
         return at(index);
     }
 
+    void reverse()
+    {
+        for (size_t i = 0; i < size() / 2; ++i)
+            AK::swap(at(i), at(size() - i - 1));
+    }
+
     [[nodiscard]] ALWAYS_INLINE constexpr T& operator[](size_t index)
     {
         return at(index);
@@ -296,7 +302,7 @@ public:
 };
 
 template<typename T>
-struct Traits<Span<T>> : public GenericTraits<Span<T>> {
+struct Traits<Span<T>> : public DefaultTraits<Span<T>> {
     static unsigned hash(Span<T> const& span)
     {
         unsigned hash = 0;
