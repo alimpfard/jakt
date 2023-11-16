@@ -406,6 +406,15 @@ struct CodeGenerator {
             (output, compiler.current_file_path()!.to_string()),
         )
 
+        // Add the imports of the root module to all the modules; these are the implicitly imported prelude modules.
+        mut implicitly_imported_prelude = ""
+        let root_module = generator.program.modules[generator.program.root_scope_id!.module_id.id]
+        for id in root_module.imports {
+            let module = generator.program.modules[id.id]
+            if module.name.starts_with("jakt__") {
+                implicitly_imported_prelude += format("#include \"{}.h\"\n", module.name)
+            }
+        }
 
         for as_forward in [true, false] {
             for idx in sorted_modules.size()..0 {
@@ -427,6 +436,10 @@ struct CodeGenerator {
                     output += "#include \"__unified_forward.h\"\n"
                 } else {
                     output = format("#include \"{}\"\n", header_name)
+                }
+
+                if not module.name.starts_with("jakt__") {
+                    output += implicitly_imported_prelude
                 }
 
                 let scope_id = ScopeId(module_id: module.id, id: 0)
