@@ -1,5 +1,13 @@
 #pragma once
 #include "__unified_forward.h"
+#include "jakt__prelude__reflection.h"
+#include "jakt__prelude__prelude.h"
+#include "jakt__libc__io.h"
+#include "jakt__arguments.h"
+#include "jakt__file_iterator.h"
+#include "jakt__path.h"
+#include "jakt__platform.h"
+#include "jakt__platform__unknown_fs.h"
 #include "parser.h"
 #include "typechecker.h"
 #include "types.h"
@@ -47,11 +55,6 @@ public: ErrorOr<DeprecatedString> debug_description() const;
 public: NonnullRefPtr<compiler::Compiler> compiler;public: JaktInternal::Dictionary<size_t,JaktInternal::DynamicArray<codegen::LineSpan>> line_spans;public: bool statement_span_comments;public: ErrorOr<void> gather_line_spans();
 public: ErrorOr<DeprecatedString> span_to_source_location(utility::Span const span);
 public: CodegenDebugInfo(NonnullRefPtr<compiler::Compiler> a_compiler, JaktInternal::Dictionary<size_t,JaktInternal::DynamicArray<codegen::LineSpan>> a_line_spans, bool a_statement_span_comments);
-
-public: ErrorOr<DeprecatedString> debug_description() const;
-};struct LineSpan {
-  public:
-public: size_t start;public: size_t end;public: LineSpan(size_t a_start, size_t a_end);
 
 public: ErrorOr<DeprecatedString> debug_description() const;
 };struct CodeGenerator {
@@ -129,6 +132,11 @@ public: ErrorOr<DeprecatedString> codegen_type_possibly_as_namespace(ids::TypeId
 public: ErrorOr<void> codegen_enum_destructor_body(types::CheckedEnum const enum_, DeprecatedString& output) const;
 public: ErrorOr<DeprecatedString> codegen_struct_predecl(types::CheckedStruct const struct_);
 public: ErrorOr<DeprecatedString> debug_description() const;
+};struct LineSpan {
+  public:
+public: size_t start;public: size_t end;public: LineSpan(size_t a_start, size_t a_end);
+
+public: ErrorOr<DeprecatedString> debug_description() const;
 };}
 } // namespace Jakt
 template<>struct Jakt::Formatter<Jakt::codegen::AllowedControlExits> : Jakt::Formatter<Jakt::StringView>{
@@ -149,14 +157,14 @@ JaktInternal::PrettyPrint::ScopedEnable pretty_print_enable { m_alternative_form
 };
 namespace Jakt {
 } // namespace Jakt
-template<>struct Jakt::Formatter<Jakt::codegen::LineSpan> : Jakt::Formatter<Jakt::StringView>{
-Jakt::ErrorOr<void> format(Jakt::FormatBuilder& builder, Jakt::codegen::LineSpan const& value) {
+template<>struct Jakt::Formatter<Jakt::codegen::CodeGenerator> : Jakt::Formatter<Jakt::StringView>{
+Jakt::ErrorOr<void> format(Jakt::FormatBuilder& builder, Jakt::codegen::CodeGenerator const& value) {
 JaktInternal::PrettyPrint::ScopedEnable pretty_print_enable { m_alternative_form };Jakt::ErrorOr<void> format_error = Jakt::Formatter<Jakt::StringView>::format(builder, MUST(value.debug_description()));return format_error;}
 };
 namespace Jakt {
 } // namespace Jakt
-template<>struct Jakt::Formatter<Jakt::codegen::CodeGenerator> : Jakt::Formatter<Jakt::StringView>{
-Jakt::ErrorOr<void> format(Jakt::FormatBuilder& builder, Jakt::codegen::CodeGenerator const& value) {
+template<>struct Jakt::Formatter<Jakt::codegen::LineSpan> : Jakt::Formatter<Jakt::StringView>{
+Jakt::ErrorOr<void> format(Jakt::FormatBuilder& builder, Jakt::codegen::LineSpan const& value) {
 JaktInternal::PrettyPrint::ScopedEnable pretty_print_enable { m_alternative_form };Jakt::ErrorOr<void> format_error = Jakt::Formatter<Jakt::StringView>::format(builder, MUST(value.debug_description()));return format_error;}
 };
 namespace Jakt {

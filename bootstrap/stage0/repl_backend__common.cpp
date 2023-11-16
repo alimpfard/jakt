@@ -1,4 +1,12 @@
 #include "repl_backend__common.h"
+#include "jakt__prelude__reflection.h"
+#include "jakt__prelude__prelude.h"
+#include "jakt__libc__io.h"
+#include "jakt__arguments.h"
+#include "jakt__file_iterator.h"
+#include "jakt__path.h"
+#include "jakt__platform.h"
+#include "jakt__platform__unknown_fs.h"
 namespace Jakt {
 namespace repl_backend__common {
 ErrorOr<DeprecatedString> repl_backend__common::Style::debug_description() const { auto builder = DeprecatedStringBuilder::create();TRY(builder.append("Style("sv));{

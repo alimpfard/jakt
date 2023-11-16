@@ -1,4 +1,12 @@
 #include "cpp_import__common.h"
+#include "jakt__prelude__reflection.h"
+#include "jakt__prelude__prelude.h"
+#include "jakt__libc__io.h"
+#include "jakt__arguments.h"
+#include "jakt__file_iterator.h"
+#include "jakt__path.h"
+#include "jakt__platform.h"
+#include "jakt__platform__unknown_fs.h"
 namespace Jakt {
 namespace cpp_import__common {
 ErrorOr<DeprecatedString> read_all(DeprecatedString const filename) {

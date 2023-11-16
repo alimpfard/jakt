@@ -1,5 +1,13 @@
 #pragma once
 #include "__unified_forward.h"
+#include "jakt__prelude__reflection.h"
+#include "jakt__prelude__prelude.h"
+#include "jakt__libc__io.h"
+#include "jakt__arguments.h"
+#include "jakt__file_iterator.h"
+#include "jakt__path.h"
+#include "jakt__platform.h"
+#include "jakt__platform__unknown_fs.h"
 #include "compiler.h"
 #include "lexer.h"
 namespace Jakt {
@@ -40,83 +48,7 @@ private: ErrorOr<void> replace_state(formatter::State const state);
 private: ErrorOr<JaktInternal::Optional<formatter::FormattedToken>> next_in_variable_declaration_context(size_t const open_parens, lexer::Token const token);
 public: static ErrorOr<formatter::Stage0> for_tokens(JaktInternal::DynamicArray<lexer::Token> const tokens, bool const debug);
 public: ErrorOr<DeprecatedString> debug_description() const;
-};struct Formatter {
-  public:
-public: formatter::Stage0 token_provider;public: JaktInternal::DynamicArray<formatter::ReflowState> current_line;public: size_t current_line_length;public: size_t max_allowed_line_length;public: JaktInternal::DynamicArray<formatter::BreakablePoint> breakable_points_in_current_line;public: JaktInternal::DynamicArray<formatter::ReflowState> tokens_to_reflow;public: JaktInternal::DynamicArray<JaktInternal::Optional<lexer::Token>> replace_commas_in_enclosure;public: size_t enclosures_to_ignore;public: bool in_condition_expr;public: bool in_condition_expr_indented;public: JaktInternal::Optional<size_t> logical_break_indent;public: size_t empty_line_count;public: ErrorOr<JaktInternal::Optional<JaktInternal::DynamicArray<formatter::FormattedToken>>> next();
-private: static bool should_ignore_state(formatter::State const state);
-public: ErrorOr<JaktInternal::Optional<formatter::FormattedToken>> peek();
-public: static ErrorOr<formatter::Formatter> for_tokens(JaktInternal::DynamicArray<lexer::Token> const tokens, bool const debug, size_t const max_allowed_line_length);
-private: static ErrorOr<JaktInternal::DynamicArray<u8>> to_array(DeprecatedString const s);
-private: ErrorOr<void> fixup_tokens_to_reflow();
-public: Formatter(formatter::Stage0 a_token_provider, JaktInternal::DynamicArray<formatter::ReflowState> a_current_line, size_t a_current_line_length, size_t a_max_allowed_line_length, JaktInternal::DynamicArray<formatter::BreakablePoint> a_breakable_points_in_current_line, JaktInternal::DynamicArray<formatter::ReflowState> a_tokens_to_reflow, JaktInternal::DynamicArray<JaktInternal::Optional<lexer::Token>> a_replace_commas_in_enclosure, size_t a_enclosures_to_ignore, bool a_in_condition_expr, bool a_in_condition_expr_indented, JaktInternal::Optional<size_t> a_logical_break_indent, size_t a_empty_line_count);
-
-private: ErrorOr<size_t> token_length(formatter::FormattedToken const token) const;
-public: ErrorOr<void> fixup_closing_enclosures(JaktInternal::DynamicArray<formatter::ReflowState>& line) const;
-private: size_t pick_breaking_point_index() const;
-public: ErrorOr<DeprecatedString> debug_description() const;
-};struct ExpressionMode {
-u8 __jakt_variant_index = 0;
-union VariantData {
-u8 __jakt_uninit_value;
-constexpr VariantData() {}
-~VariantData() {}
-} as;
-constexpr u8 __jakt_init_index() const noexcept { return __jakt_variant_index - 1; }ErrorOr<DeprecatedString> debug_description() const;
-[[nodiscard]] static ExpressionMode OutsideExpression();
-[[nodiscard]] static ExpressionMode BeforeExpressions();
-[[nodiscard]] static ExpressionMode AtExpressionStart();
-[[nodiscard]] static ExpressionMode InExpression();
-~ExpressionMode();
-ExpressionMode& operator=(ExpressionMode const &);
-ExpressionMode& operator=(ExpressionMode &&);
-ExpressionMode(ExpressionMode const&);
-ExpressionMode(ExpressionMode &&);
-private: void __jakt_destroy_variant();
-public:
-private:
-ExpressionMode() {};
-};
-struct BreakablePoint {
-u8 __jakt_variant_index = 0;
-union VariantData {
-u8 __jakt_uninit_value;
-struct {
-size_t point;
-size_t length;
-} Paren;
-struct {
-size_t point;
-size_t length;
-} Curly;
-struct {
-size_t point;
-size_t length;
-} Square;
-struct {
-size_t point;
-size_t length;
-} Logical;
-constexpr VariantData() {}
-~VariantData() {}
-} as;
-constexpr u8 __jakt_init_index() const noexcept { return __jakt_variant_index - 1; }ErrorOr<DeprecatedString> debug_description() const;
-[[nodiscard]] static BreakablePoint Paren(size_t point, size_t length);
-[[nodiscard]] static BreakablePoint Curly(size_t point, size_t length);
-[[nodiscard]] static BreakablePoint Square(size_t point, size_t length);
-[[nodiscard]] static BreakablePoint Logical(size_t point, size_t length);
-~BreakablePoint();
-BreakablePoint& operator=(BreakablePoint const &);
-BreakablePoint& operator=(BreakablePoint &&);
-BreakablePoint(BreakablePoint const&);
-BreakablePoint(BreakablePoint &&);
-private: void __jakt_destroy_variant();
-public:
-size_t length() const;
-size_t point() const;
-private:
-BreakablePoint() {};
-};
-struct FormattedToken {
+};struct FormattedToken {
   public:
 public: lexer::Token token;public: size_t indent;public: JaktInternal::DynamicArray<u8> trailing_trivia;public: JaktInternal::DynamicArray<u8> preceding_trivia;public: FormattedToken(lexer::Token a_token, size_t a_indent, JaktInternal::DynamicArray<u8> a_trailing_trivia, JaktInternal::DynamicArray<u8> a_preceding_trivia);
 
@@ -149,6 +81,28 @@ public:
 static formatter::Entity from_token(lexer::Token const& token);
 private:
 Entity() {};
+};
+struct ExpressionMode {
+u8 __jakt_variant_index = 0;
+union VariantData {
+u8 __jakt_uninit_value;
+constexpr VariantData() {}
+~VariantData() {}
+} as;
+constexpr u8 __jakt_init_index() const noexcept { return __jakt_variant_index - 1; }ErrorOr<DeprecatedString> debug_description() const;
+[[nodiscard]] static ExpressionMode OutsideExpression();
+[[nodiscard]] static ExpressionMode BeforeExpressions();
+[[nodiscard]] static ExpressionMode AtExpressionStart();
+[[nodiscard]] static ExpressionMode InExpression();
+~ExpressionMode();
+ExpressionMode& operator=(ExpressionMode const &);
+ExpressionMode& operator=(ExpressionMode &&);
+ExpressionMode(ExpressionMode const&);
+ExpressionMode(ExpressionMode &&);
+private: void __jakt_destroy_variant();
+public:
+private:
+ExpressionMode() {};
 };
 struct State {
 u8 __jakt_variant_index = 0;
@@ -246,7 +200,61 @@ struct ReflowState {
 public: formatter::FormattedToken token;public: formatter::State state;public: size_t enclosures_to_ignore;public: ReflowState(formatter::FormattedToken a_token, formatter::State a_state, size_t a_enclosures_to_ignore);
 
 public: ErrorOr<DeprecatedString> debug_description() const;
-};template <typename T>
+};struct Formatter {
+  public:
+public: formatter::Stage0 token_provider;public: JaktInternal::DynamicArray<formatter::ReflowState> current_line;public: size_t current_line_length;public: size_t max_allowed_line_length;public: JaktInternal::DynamicArray<formatter::BreakablePoint> breakable_points_in_current_line;public: JaktInternal::DynamicArray<formatter::ReflowState> tokens_to_reflow;public: JaktInternal::DynamicArray<JaktInternal::Optional<lexer::Token>> replace_commas_in_enclosure;public: size_t enclosures_to_ignore;public: bool in_condition_expr;public: bool in_condition_expr_indented;public: JaktInternal::Optional<size_t> logical_break_indent;public: size_t empty_line_count;public: ErrorOr<JaktInternal::Optional<JaktInternal::DynamicArray<formatter::FormattedToken>>> next();
+private: static bool should_ignore_state(formatter::State const state);
+public: ErrorOr<JaktInternal::Optional<formatter::FormattedToken>> peek();
+public: static ErrorOr<formatter::Formatter> for_tokens(JaktInternal::DynamicArray<lexer::Token> const tokens, bool const debug, size_t const max_allowed_line_length);
+private: static ErrorOr<JaktInternal::DynamicArray<u8>> to_array(DeprecatedString const s);
+private: ErrorOr<void> fixup_tokens_to_reflow();
+public: Formatter(formatter::Stage0 a_token_provider, JaktInternal::DynamicArray<formatter::ReflowState> a_current_line, size_t a_current_line_length, size_t a_max_allowed_line_length, JaktInternal::DynamicArray<formatter::BreakablePoint> a_breakable_points_in_current_line, JaktInternal::DynamicArray<formatter::ReflowState> a_tokens_to_reflow, JaktInternal::DynamicArray<JaktInternal::Optional<lexer::Token>> a_replace_commas_in_enclosure, size_t a_enclosures_to_ignore, bool a_in_condition_expr, bool a_in_condition_expr_indented, JaktInternal::Optional<size_t> a_logical_break_indent, size_t a_empty_line_count);
+
+private: ErrorOr<size_t> token_length(formatter::FormattedToken const token) const;
+public: ErrorOr<void> fixup_closing_enclosures(JaktInternal::DynamicArray<formatter::ReflowState>& line) const;
+private: size_t pick_breaking_point_index() const;
+public: ErrorOr<DeprecatedString> debug_description() const;
+};struct BreakablePoint {
+u8 __jakt_variant_index = 0;
+union VariantData {
+u8 __jakt_uninit_value;
+struct {
+size_t point;
+size_t length;
+} Paren;
+struct {
+size_t point;
+size_t length;
+} Curly;
+struct {
+size_t point;
+size_t length;
+} Square;
+struct {
+size_t point;
+size_t length;
+} Logical;
+constexpr VariantData() {}
+~VariantData() {}
+} as;
+constexpr u8 __jakt_init_index() const noexcept { return __jakt_variant_index - 1; }ErrorOr<DeprecatedString> debug_description() const;
+[[nodiscard]] static BreakablePoint Paren(size_t point, size_t length);
+[[nodiscard]] static BreakablePoint Curly(size_t point, size_t length);
+[[nodiscard]] static BreakablePoint Square(size_t point, size_t length);
+[[nodiscard]] static BreakablePoint Logical(size_t point, size_t length);
+~BreakablePoint();
+BreakablePoint& operator=(BreakablePoint const &);
+BreakablePoint& operator=(BreakablePoint &&);
+BreakablePoint(BreakablePoint const&);
+BreakablePoint(BreakablePoint &&);
+private: void __jakt_destroy_variant();
+public:
+size_t length() const;
+size_t point() const;
+private:
+BreakablePoint() {};
+};
+template <typename T>
 ErrorOr<JaktInternal::DynamicArray<T>> concat(JaktInternal::DynamicArray<T> const xs, T const y);
 template <typename T>
 JaktInternal::Optional<T> collapse(JaktInternal::Optional<JaktInternal::Optional<T>> const x);
@@ -256,24 +264,6 @@ ErrorOr<JaktInternal::DynamicArray<T>> init(JaktInternal::DynamicArray<T> const 
 } // namespace Jakt
 template<>struct Jakt::Formatter<Jakt::formatter::Stage0> : Jakt::Formatter<Jakt::StringView>{
 Jakt::ErrorOr<void> format(Jakt::FormatBuilder& builder, Jakt::formatter::Stage0 const& value) {
-JaktInternal::PrettyPrint::ScopedEnable pretty_print_enable { m_alternative_form };Jakt::ErrorOr<void> format_error = Jakt::Formatter<Jakt::StringView>::format(builder, MUST(value.debug_description()));return format_error;}
-};
-namespace Jakt {
-} // namespace Jakt
-template<>struct Jakt::Formatter<Jakt::formatter::Formatter> : Jakt::Formatter<Jakt::StringView>{
-Jakt::ErrorOr<void> format(Jakt::FormatBuilder& builder, Jakt::formatter::Formatter const& value) {
-JaktInternal::PrettyPrint::ScopedEnable pretty_print_enable { m_alternative_form };Jakt::ErrorOr<void> format_error = Jakt::Formatter<Jakt::StringView>::format(builder, MUST(value.debug_description()));return format_error;}
-};
-namespace Jakt {
-} // namespace Jakt
-template<>struct Jakt::Formatter<Jakt::formatter::ExpressionMode> : Jakt::Formatter<Jakt::StringView>{
-Jakt::ErrorOr<void> format(Jakt::FormatBuilder& builder, Jakt::formatter::ExpressionMode const& value) {
-JaktInternal::PrettyPrint::ScopedEnable pretty_print_enable { m_alternative_form };Jakt::ErrorOr<void> format_error = Jakt::Formatter<Jakt::StringView>::format(builder, MUST(value.debug_description()));return format_error;}
-};
-namespace Jakt {
-} // namespace Jakt
-template<>struct Jakt::Formatter<Jakt::formatter::BreakablePoint> : Jakt::Formatter<Jakt::StringView>{
-Jakt::ErrorOr<void> format(Jakt::FormatBuilder& builder, Jakt::formatter::BreakablePoint const& value) {
 JaktInternal::PrettyPrint::ScopedEnable pretty_print_enable { m_alternative_form };Jakt::ErrorOr<void> format_error = Jakt::Formatter<Jakt::StringView>::format(builder, MUST(value.debug_description()));return format_error;}
 };
 namespace Jakt {
@@ -290,6 +280,12 @@ JaktInternal::PrettyPrint::ScopedEnable pretty_print_enable { m_alternative_form
 };
 namespace Jakt {
 } // namespace Jakt
+template<>struct Jakt::Formatter<Jakt::formatter::ExpressionMode> : Jakt::Formatter<Jakt::StringView>{
+Jakt::ErrorOr<void> format(Jakt::FormatBuilder& builder, Jakt::formatter::ExpressionMode const& value) {
+JaktInternal::PrettyPrint::ScopedEnable pretty_print_enable { m_alternative_form };Jakt::ErrorOr<void> format_error = Jakt::Formatter<Jakt::StringView>::format(builder, MUST(value.debug_description()));return format_error;}
+};
+namespace Jakt {
+} // namespace Jakt
 template<>struct Jakt::Formatter<Jakt::formatter::State> : Jakt::Formatter<Jakt::StringView>{
 Jakt::ErrorOr<void> format(Jakt::FormatBuilder& builder, Jakt::formatter::State const& value) {
 JaktInternal::PrettyPrint::ScopedEnable pretty_print_enable { m_alternative_form };Jakt::ErrorOr<void> format_error = Jakt::Formatter<Jakt::StringView>::format(builder, MUST(value.debug_description()));return format_error;}
@@ -298,6 +294,18 @@ namespace Jakt {
 } // namespace Jakt
 template<>struct Jakt::Formatter<Jakt::formatter::ReflowState> : Jakt::Formatter<Jakt::StringView>{
 Jakt::ErrorOr<void> format(Jakt::FormatBuilder& builder, Jakt::formatter::ReflowState const& value) {
+JaktInternal::PrettyPrint::ScopedEnable pretty_print_enable { m_alternative_form };Jakt::ErrorOr<void> format_error = Jakt::Formatter<Jakt::StringView>::format(builder, MUST(value.debug_description()));return format_error;}
+};
+namespace Jakt {
+} // namespace Jakt
+template<>struct Jakt::Formatter<Jakt::formatter::Formatter> : Jakt::Formatter<Jakt::StringView>{
+Jakt::ErrorOr<void> format(Jakt::FormatBuilder& builder, Jakt::formatter::Formatter const& value) {
+JaktInternal::PrettyPrint::ScopedEnable pretty_print_enable { m_alternative_form };Jakt::ErrorOr<void> format_error = Jakt::Formatter<Jakt::StringView>::format(builder, MUST(value.debug_description()));return format_error;}
+};
+namespace Jakt {
+} // namespace Jakt
+template<>struct Jakt::Formatter<Jakt::formatter::BreakablePoint> : Jakt::Formatter<Jakt::StringView>{
+Jakt::ErrorOr<void> format(Jakt::FormatBuilder& builder, Jakt::formatter::BreakablePoint const& value) {
 JaktInternal::PrettyPrint::ScopedEnable pretty_print_enable { m_alternative_form };Jakt::ErrorOr<void> format_error = Jakt::Formatter<Jakt::StringView>::format(builder, MUST(value.debug_description()));return format_error;}
 };
 namespace Jakt {

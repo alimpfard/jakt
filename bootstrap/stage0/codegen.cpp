@@ -1,4 +1,12 @@
 #include "codegen.h"
+#include "jakt__prelude__reflection.h"
+#include "jakt__prelude__prelude.h"
+#include "jakt__libc__io.h"
+#include "jakt__arguments.h"
+#include "jakt__file_iterator.h"
+#include "jakt__path.h"
+#include "jakt__platform.h"
+#include "jakt__platform__unknown_fs.h"
 namespace Jakt {
 namespace codegen {
 bool are_loop_exits_allowed(codegen::AllowedControlExits const allowed_control_exits) {
@@ -596,6 +604,32 @@ return {};
 }
 (output,TRY(DeprecatedString::from_utf8("} // namespace Jakt\n"sv)))));
 TRY((((result).set(TRY(DeprecatedString::from_utf8("__unified_forward.h"sv)),(Tuple{output, (((((compiler)->current_file_path()).value())).to_string())})))));
+DeprecatedString implicitly_imported_prelude = TRY(DeprecatedString::from_utf8(""sv));
+NonnullRefPtr<types::Module> const root_module = ((((((generator).program))->modules))[(((((((((generator).program))->root_scope_id).value())).module_id)).id)]);
+{
+JaktInternal::ArrayIterator<ids::ModuleId> _magic = ((((root_module)->imports)).iterator());
+for (;;){
+JaktInternal::Optional<ids::ModuleId> const _magic_value = ((_magic).next());
+if ((!(((_magic_value).has_value())))){
+break;
+}
+ids::ModuleId id = (_magic_value.value());
+{
+NonnullRefPtr<types::Module> const module = ((((((generator).program))->modules))[((id).id)]);
+if (((((module)->name)).starts_with(TRY(DeprecatedString::from_utf8("jakt__"sv))))){
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(implicitly_imported_prelude,TRY((__jakt_format((StringView::from_string_literal("#include \"{}.h\"\n"sv)),((module)->name)))))));
+}
+}
+
+}
+}
+
 {
 JaktInternal::ArrayIterator<bool> _magic = (((TRY((DynamicArray<bool>::create_with({true, false}))))).iterator());
 for (;;){
@@ -636,6 +670,15 @@ else {
 (output = TRY((__jakt_format((StringView::from_string_literal("#include \"{}\"\n"sv)),header_name))));
 }
 
+if ((!(((((module)->name)).starts_with(TRY(DeprecatedString::from_utf8("jakt__"sv))))))){
+TRY(([](DeprecatedString& self, DeprecatedString rhs) -> ErrorOr<void> {
+{
+(self = TRY((((self) + (rhs)))));
+}
+return {};
+}
+(output,implicitly_imported_prelude)));
+}
 ids::ScopeId const scope_id = ids::ScopeId(((module)->id),static_cast<size_t>(0ULL));
 NonnullRefPtr<types::Scope> const scope = TRY((((((generator).program))->get_scope(scope_id))));
 if (as_forward){
