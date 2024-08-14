@@ -7273,6 +7273,17 @@ class Interpreter {
         return .find_or_add_type_id(type)
     }
 
+    public fn array_type_of_enum(mut this, anon enum_id: EnumId) throws -> TypeId {
+        let array_struct_id = .program.find_struct_in_prelude("Array")
+        let type = Type::GenericInstance(
+            id: array_struct_id
+            args: [
+                .program.get_enum(enum_id).type_id
+            ]
+        )
+        return .find_or_add_type_id(type)
+    }
+
     public fn array_value_of_type(mut this, values: [Value], type: TypeId, span: Span) throws -> Value {
         let array_struct_id = .program.find_struct_in_prelude("Array")
         let array_type = Type::GenericInstance(
@@ -7397,12 +7408,28 @@ class Interpreter {
             parent_scope_id: .program.get_struct(parameter_type_id).scope_id
             function_name: "Parameter")!
 
+        let (statement_enum_id, statement_type_id) = match .program.find_reflected_primitive("Statement") {
+            Enum(id) => (id, .program.get_enum(id).type_id)
+            else => {
+                panic("Expected Statement to be an enum")
+            }
+        }
+
+        let expression_enum_id = match .program.find_reflected_primitive("Expression") {
+            Enum(id) => id
+            else => {
+                panic("Expected Expression to be an enum")
+            }
+        }
+
         mut method_values: [Value] = []
         let scope = .program.get_scope(scope_id)
         for (name, ids) in scope.functions {
             for id in ids {
                 let function = .program.get_function(id)
                 mut parameters: [Value] = []
+                mut statements: [Value] = []
+
                 for param in function.params {
                     let p = Value(
                         impl: ValueImpl::Struct(
@@ -7421,6 +7448,10 @@ class Interpreter {
                     )
 
                     parameters.push(p)
+                }
+
+                for stmt in function.block.statements {
+                    statements.push(.reflect_statement(stmt, span, scope: interpreter_scope, statement_enum_id, expression_enum_id))
                 }
 
                 let value = Value(
@@ -7446,6 +7477,12 @@ class Interpreter {
                             .bool_value(function.can_throw, span)
                             // is_comptime:
                             .bool_value(function.is_comptime, span)
+                            // block:
+                            .array_value_of_type(
+                                values: statements
+                                type: .array_type_of_enum(statement_enum_id)
+                                span
+                            )
                         ]
                         struct_id: function_struct_id
                         constructor: function_struct_constructor
@@ -7672,6 +7709,541 @@ class Interpreter {
         }
 
         return result
+    }
+
+    public fn reflect_statement(
+        mut this
+        stmt: CheckedStatement
+        span: Span
+        scope: InterpreterScope
+        statement_enum_id: EnumId
+        expression_enum_id: EnumId
+    ) throws -> Value {
+        let statement_constructor = fn[statement_enum_id, this](anon name: String) throws -> FunctionId {
+            let constructor = .program.find_function_in_scope(
+                parent_scope_id: .program.get_enum(statement_enum_id).scope_id
+                function_name: name
+            )
+
+            if not constructor.has_value() {
+                .compiler.panic(format("Attempted to access a Reflect::Statement variant that does not exist: {}", name))
+            }
+
+            return constructor!
+        }
+
+        return match stmt {
+            Expression(expr) => Value(
+                impl: ValueImpl::Enum(
+                    fields: [.reflect_expression(expr, span, scope, statement_enum_id, expression_enum_id)]
+                    enum_id: statement_enum_id
+                    constructor: statement_constructor("Expression")
+                )
+                span
+            )
+            Defer(statement) => Value(
+                impl: ValueImpl::Enum(
+                    fields: [.reflect_statement(stmt: statement, span, scope, statement_enum_id, expression_enum_id)]
+                    enum_id: statement_enum_id
+                    constructor: statement_constructor("Defer")
+                )
+                span
+            )
+            DestructuringAssignment(vars, var_decl) => {
+                mut fields: [Value] = []
+                for var in vars {
+                    fields.push(.reflect_statement(stmt: var, span, scope, statement_enum_id, expression_enum_id))
+                }
+                let var_decl_value = .reflect_statement(stmt: var_decl, span, scope, statement_enum_id, expression_enum_id)
+                fields.push(var_decl_value)
+                yield Value(
+                    impl: ValueImpl::Enum(
+                        fields: fields
+                        enum_id: statement_enum_id
+                        constructor: statement_constructor("DestructuringAssignment")
+                    )
+                    span
+                )
+            }
+            VarDecl(var_id, init) => {
+                let var = .program.get_variable(var_id)
+                let name = .string_value(var.name, span)
+                let type = .reflect_type(type_id: var.type_id, span, scope)
+                let init_value = .reflect_expression(expr: init, span, scope, statement_enum_id, expression_enum_id)
+                yield Value(
+                    impl: ValueImpl::Enum(
+                        fields: [
+                            name
+                            type
+                            init_value
+                        ]
+                        enum_id: statement_enum_id
+                        constructor: statement_constructor("VarDecl")
+                    )
+                    span
+                )
+            }
+            If(condition, then_block, else_statement) => {
+                let condition_value = .reflect_expression(expr: condition, span, scope, statement_enum_id, expression_enum_id)
+                mut then_block_statements: [Value] = []
+                for stmt in then_block.statements {
+                    then_block_statements.push(.reflect_statement(stmt, span, scope, statement_enum_id, expression_enum_id))
+                }
+                let then_block_value = Value(
+                    impl: ValueImpl::JaktArray(
+                        values: then_block_statements
+                        type_id: .array_type_of_enum(statement_enum_id)
+                    )
+                    span
+                )
+                let else_value = match else_statement.has_value() {
+                    true => Value(
+                        impl: ValueImpl::OptionalSome(
+                            value: .reflect_statement(stmt: else_statement!, span, scope, statement_enum_id, expression_enum_id)
+                        )
+                        span
+                    )
+                    false => Value(
+                        impl: ValueImpl::OptionalNone
+                        span
+                    )
+                }
+
+                yield Value(
+                    impl: ValueImpl::Enum(
+                        fields: [
+                            condition_value
+                            then_block_value
+                            else_value
+                        ]
+                        enum_id: statement_enum_id
+                        constructor: statement_constructor("If")
+                    )
+                    span
+                )
+            }
+            Block(block) => {
+                mut statements: [Value] = []
+                for stmt in block.statements {
+                    statements.push(.reflect_statement(stmt, span, scope, statement_enum_id, expression_enum_id))
+                }
+                yield Value(
+                    impl: ValueImpl::JaktArray(
+                        values: statements
+                        type_id: .array_type_of_enum(statement_enum_id)
+                    )
+                    span
+                )
+            }
+            Loop(block) => {
+                mut statements: [Value] = []
+                for stmt in block.statements {
+                    statements.push(.reflect_statement(stmt, span, scope, statement_enum_id, expression_enum_id))
+                }
+                yield Value(
+                    impl: ValueImpl::JaktArray(
+                        values: statements
+                        type_id: .array_type_of_enum(statement_enum_id)
+                    )
+                    span
+                )
+            }
+            While(condition, block) => {
+                let condition_value = .reflect_expression(expr: condition, span, scope, statement_enum_id, expression_enum_id)
+                mut statements: [Value] = []
+                for stmt in block.statements {
+                    statements.push(.reflect_statement(stmt, span, scope, statement_enum_id, expression_enum_id))
+                }
+                yield Value(
+                    impl: ValueImpl::Enum(
+                        fields: [
+                            condition_value
+                            Value(
+                                impl: ValueImpl::JaktArray(
+                                    values: statements
+                                    type_id: .array_type_of_enum(statement_enum_id)
+                                )
+                                span
+                            )
+                        ]
+                        enum_id: statement_enum_id
+                        constructor: statement_constructor("While")
+                    )
+                    span
+                )
+            }
+            Return(val) => {
+                let value = match val.has_value() {
+                    true => Value(
+                        impl: ValueImpl::OptionalSome(
+                            value: .reflect_expression(expr: val!, span, scope, statement_enum_id, expression_enum_id)
+                        )
+                        span
+                    )
+                    false => Value(
+                        impl: ValueImpl::OptionalNone
+                        span
+                    )
+                }
+                yield Value(
+                    impl: ValueImpl::Enum(
+                        fields: [value]
+                        enum_id: statement_enum_id
+                        constructor: statement_constructor("Return")
+                    )
+                    span
+                )
+            }
+            Break => Value(
+                impl: ValueImpl::Enum(
+                    fields: []
+                    enum_id: statement_enum_id
+                    constructor: statement_constructor("Break")
+                )
+                span
+            )
+            Continue => Value(
+                impl: ValueImpl::Enum(
+                    fields: []
+                    enum_id: statement_enum_id
+                    constructor: statement_constructor("Continue")
+                )
+                span
+            )
+            Throw(expr) => {
+                let value = .reflect_expression(expr, span, scope, statement_enum_id, expression_enum_id)
+                yield Value(
+                    impl: ValueImpl::Enum(
+                        fields: [value]
+                        enum_id: statement_enum_id
+                        constructor: statement_constructor("Throw")
+                    )
+                    span
+                )
+            }
+            Yield(expr) => {
+                let value = match expr.has_value() {
+                    true => Value(
+                        impl: ValueImpl::OptionalSome(
+                            value: .reflect_expression(expr: expr!, span, scope, statement_enum_id, expression_enum_id)
+                        )
+                        span
+                    )
+                    false => Value(
+                        impl: ValueImpl::OptionalNone
+                        span
+                    )
+                }
+                yield Value(
+                    impl: ValueImpl::Enum(
+                        fields: [value]
+                        enum_id: statement_enum_id
+                        constructor: statement_constructor("Yield")
+                    )
+                    span
+                )
+            }
+            InlineCpp(lines) => {
+                mut lines_values: [Value] = []
+                for line in lines {
+                    lines_values.push(.string_value(line, span))
+                }
+                yield Value(
+                    impl: ValueImpl::Enum(
+                        fields: [
+                            Value(
+                                impl: ValueImpl::JaktArray(
+                                    values: lines_values
+                                    type_id: .array_type_of_struct(.program.find_struct_in_prelude("String"))
+                                )
+                                span
+                            )
+                        ]
+                        enum_id: statement_enum_id
+                        constructor: statement_constructor("InlineCpp")
+                    )
+                    span
+                )
+            }
+            Garbage => {
+                throw Error::from_string_literal("Garbage statement in reflected object")
+            }
+        }
+    }
+
+    public fn reflect_expression(
+        mut this
+        expr: CheckedExpression
+        span: Span
+        scope: InterpreterScope
+        statement_enum_id: EnumId
+        expression_enum_id: EnumId
+    ) throws -> Value {
+        let expression_constructor = fn[expression_enum_id, this](anon name: String) throws -> FunctionId {
+            let constructor = .program.find_function_in_scope(
+                parent_scope_id: .program.get_enum(expression_enum_id).scope_id
+                function_name: name
+            )
+
+            if not constructor.has_value() {
+                .compiler.panic(format("Attempted to access a Reflect::Enum variant that does not exist: {}", name))
+            }
+
+            return constructor!
+        }
+
+        let make_value = fn[
+            expression_enum_id
+            &expression_constructor
+            span
+        ](anon name: String, anon fields: [Value]) throws -> Value => Value(
+            impl: ValueImpl::Enum(
+                fields
+                enum_id: expression_enum_id
+                constructor: expression_constructor(name)
+            )
+            span
+        )
+
+        return match expr {
+            Boolean(val) => make_value("Boolean", [.bool_value(val, span)])
+            NumericConstant => make_value("NumericConstant", []) // TODO
+            QuotedString(val) => make_value("QuotedString", [.string_value(val.to_string(), span)])
+            ByteConstant(val) => make_value("ByteConstant", [.string_value(val, span)])
+            CharacterConstant(val) => {
+                mut code_points = val.code_points()
+                let code_point = code_points.next()
+                if not code_point.has_value() {
+                    throw Error::from_string_literal("Empty character constant")
+                }
+                yield make_value("CharacterConstant", [Value(
+                    impl: ValueImpl::U32(code_point!)
+                    span
+                )])
+            }
+            CCharacterConstant(val) => make_value("CCharacterConstant", [Value(
+                impl: ValueImpl::U8(val.byte_at(0))
+                span
+            )])
+            UnaryOp => make_value("UnaryOp", []) // TODO
+            BinaryOp => make_value("BinaryOp", []) // TODO
+            JaktTuple(vals) => {
+                mut values: [Value] = []
+                for val in vals {
+                    values.push(.reflect_expression(expr: val, span, scope, statement_enum_id, expression_enum_id))
+                }
+                yield make_value("TupleLiteral", values)
+            }
+            Range(from, to) => {
+                let from_value = match from.has_value() {
+                    true => ValueImpl::OptionalSome(value: .reflect_expression(expr: from!, span, scope, statement_enum_id, expression_enum_id))
+                    false => ValueImpl::OptionalNone
+                }
+                let to_value = match to.has_value() {
+                    true => ValueImpl::OptionalSome(value: .reflect_expression(expr: to!, span, scope, statement_enum_id, expression_enum_id))
+                    false => ValueImpl::OptionalNone
+                }
+                yield make_value("Range", [
+                    Value(impl: from_value, span)
+                    Value(impl: to_value, span)
+                ])
+            }
+            JaktArray(vals) => {
+                mut values: [Value] = []
+                for val in vals {
+                    values.push(.reflect_expression(expr: val, span, scope, statement_enum_id, expression_enum_id))
+                }
+                yield make_value("ArrayLiteral", values)
+            }
+            JaktSet(vals) => {
+                mut values: [Value] = []
+                for val in vals {
+                    values.push(.reflect_expression(expr: val, span, scope, statement_enum_id, expression_enum_id))
+                }
+                yield make_value("SetLiteral", values)
+            }
+            JaktDictionary(vals, key_type_id, value_type_id) => {
+                mut values: [Value] = []
+                for (key, val) in vals {
+                    values.push(Value(
+                        impl: ValueImpl::JaktTuple(
+                            fields: [
+                                .reflect_expression(expr: key, span, scope, statement_enum_id, expression_enum_id)
+                                .reflect_expression(expr: val, span, scope, statement_enum_id, expression_enum_id)
+                            ]
+                            type_id: .tuple_type(members: [key_type_id, value_type_id])
+                        )
+                        span
+                    ))
+                }
+                yield make_value("DictionaryLiteral", values)
+            }
+            IndexedExpression(expr, index) => {
+                let expr_value = .reflect_expression(expr, span, scope, statement_enum_id, expression_enum_id)
+                let index_value = .reflect_expression(expr: index, span, scope, statement_enum_id, expression_enum_id)
+                yield make_value("IndexedExpression", [expr_value, index_value])
+            }
+            IndexedDictionary(expr, index) => {
+                let expr_value = .reflect_expression(expr, span, scope, statement_enum_id, expression_enum_id)
+                let index_value = .reflect_expression(expr: index, span, scope, statement_enum_id, expression_enum_id)
+                yield make_value("IndexedDictionary", [expr_value, index_value])
+            }
+            IndexedTuple(expr, index, is_optional) => {
+                let expr_value = .reflect_expression(expr, span, scope, statement_enum_id, expression_enum_id)
+                let index_value = Value(
+                    impl: ValueImpl::USize(index)
+                    span
+                )
+                let is_optional_value = Value(
+                    impl: ValueImpl::Bool(is_optional)
+                    span
+                )
+                yield make_value("IndexedTuple", [expr_value, index_value, is_optional_value])
+            }
+            IndexedStruct(expr, name, is_optional) => {
+                let expr_value = .reflect_expression(expr, span, scope, statement_enum_id, expression_enum_id)
+                let index_value = .string_value(name, span)
+                let is_optional_value = Value(
+                    impl: ValueImpl::Bool(is_optional)
+                    span
+                )
+                yield make_value("IndexedStruct", [expr_value, index_value, is_optional_value])
+            }
+            IndexedCommonEnumMember(expr, index, is_optional) => {
+                let expr_value = .reflect_expression(expr, span, scope, statement_enum_id, expression_enum_id)
+                let index_value = .string_value(index, span)
+                let is_optional_value = Value(
+                    impl: ValueImpl::Bool(is_optional)
+                    span
+                )
+                yield make_value("IndexedCommonEnumMember", [expr_value, index_value, is_optional_value])
+            }
+            ComptimeIndex(expr, index, is_optional) => {
+                let expr_value = .reflect_expression(expr, span, scope, statement_enum_id, expression_enum_id)
+                let index_value = .reflect_expression(expr: index, span, scope, statement_enum_id, expression_enum_id)
+                let is_optional_value = Value(
+                    impl: ValueImpl::Bool(is_optional)
+                    span
+                )
+                yield make_value("ComptimeIndex", [expr_value, index_value, is_optional_value])
+            }
+            Match => make_value("Match", []) // TODO
+            EnumVariantArg => make_value("EnumVariantArg", []) // TODO
+            Call(call) => make_value("Call", [.reflect_call(call, span, scope)])
+            MethodCall(
+                expr
+                call
+            ) => make_value(
+                "MethodCall"
+                [.reflect_expression(expr, span, scope, statement_enum_id, expression_enum_id), .reflect_call(call, span, scope)]
+            )
+            NamespacedVar => make_value("NamespacedVar", []) // TODO
+            Var => make_value("Var", []) // TODO
+            OptionalNone => make_value("OptionalNone", [])
+            OptionalSome(expr) => make_value("OptionalSome", [.reflect_expression(expr: expr, span, scope, statement_enum_id, expression_enum_id)])
+            ForcedUnwrap(expr) => make_value("ForcedUnwrap", [.reflect_expression(expr: expr, span, scope, statement_enum_id, expression_enum_id)])
+            Block(block) => {
+                mut statements: [Value] = []
+                for stmt in block.statements {
+                    statements.push(.reflect_statement(stmt, span, scope, statement_enum_id, expression_enum_id))
+                }
+                yield make_value("Block", [
+                    .array_value_of_type(
+                        values: statements
+                        type: .array_type_of_enum(expression_enum_id)
+                        span
+                    )
+                ])
+            }
+            Function => make_value("Function", []) // TODO
+            DependentFunction => make_value("DependentFunction", []) // TODO
+            Must => make_value("Must", []) // TODO
+            Try => make_value("Try", []) // TODO
+            TryBlock => make_value("TryBlock", []) // TODO
+            Reflect(type_id) => make_value("Reflect", [.reflect_type(type_id, span, scope)])
+            Garbage => {
+                throw Error::from_string_literal("Garbage expression in reflected object")
+            }
+        }
+    }
+
+    public fn reflect_call(mut this, call: CheckedCall, span: Span, scope: InterpreterScope) throws -> Value {
+        mut namespaces: [Value] = []
+        for ns in call.namespace_ {
+            namespaces.push(.string_value(ns.name, span))
+            // FIXME: Generic parameters.
+        }
+
+        let expression_enum_id = match .program.find_reflected_primitive("Expression") {
+            Enum(id) => id
+            else => {
+                panic("Expected Expression to be an enum")
+            }
+        }
+
+        let statement_enum_id = match .program.find_reflected_primitive("Statement") {
+            Enum(id) => id
+            else => {
+                panic("Expected Statement to be an enum")
+            }
+        }
+
+        mut args: [Value] = []
+        for arg in call.args {
+            args.push(.reflect_expression(expr: arg.1, span, scope, statement_enum_id, expression_enum_id))
+        }
+
+        mut type_args: [Value] = []
+        for type_arg in call.type_args {
+            type_args.push(.reflect_type(type_id: type_arg, span, scope))
+        }
+
+        let return_type = .reflect_type(type_id: call.return_type, span, scope)
+        // struct Call { namespaces, name, args, type_args, return_type }
+        let call_struct_id = .program.find_struct_in_prelude("Call")
+        let call_constructor = .program.find_function_in_scope(
+            parent_scope_id: .program.get_struct(call_struct_id).scope_id
+            function_name: "Call"
+        )!
+
+        let type_enum_id = match .program.find_reflected_primitive("Type") {
+            Enum(id) => id
+            else => {
+                panic("Expected Reflect::Type to be an enum")
+            }
+        }
+
+        return Value(
+            impl: ValueImpl::Struct(
+                fields: [
+                    // namespaces:
+                    .array_value_of_type(
+                        values: namespaces
+                        type: .array_type_of_struct(.program.find_struct_in_prelude("String"))
+                        span
+                    ),
+                    // name:
+                    .string_value(call.name, span),
+                    // args:
+                    .array_value_of_type(
+                        values: args
+                        type: .array_type_of_enum(expression_enum_id)
+                        span
+                    ),
+                    // type_args:
+                    .array_value_of_type(
+                        values: type_args
+                        type: .array_type_of_enum(type_enum_id)
+                        span
+                    ),
+                    // return_type:
+                    return_type
+                ]
+                struct_id: call_struct_id
+                constructor: call_constructor
+            )
+            span
+        )
     }
 
     public fn reflect_type(mut this, type_id: TypeId, span: Span, scope: InterpreterScope) throws -> Value {

@@ -218,16 +218,100 @@ namespace Reflect {
         name: String
         generic_parameters: [String]
         parameters: [Reflect::Parameter]
-        // block: Reflect::Block
         return_type: Reflect::Type
         can_throw: bool
         is_comptime: bool
+        block: [Reflect::Statement]
     }
     struct Parameter {
         name: String
         type: Reflect::Type
         requires_label: bool
         // default_value: Reflect::Expression?
+    }
+    boxed enum Statement {
+        Expression(Reflect::Expression)
+        Defer(Reflect::Statement)
+        DestructuringAssignment(vars: [Reflect::Statement], var_decl: Reflect::Statement)
+        VarDecl(name: String, type: Reflect::Type, init: Reflect::Expression)
+        If(condition: Reflect::Expression, then_block: [Reflect::Statement], else_statement: Reflect::Statement?)
+        Block([Reflect::Statement])
+        Loop([Reflect::Statement])
+        While(condition: Reflect::Expression, block: [Reflect::Statement])
+        Return(Reflect::Expression?)
+        Break
+        Continue
+        Throw(Reflect::Expression)
+        Yield(Reflect::Expression?)
+        InlineCpp([String])
+    }
+    boxed enum Expression {
+        Boolean(bool)
+        NumericConstant(
+            // TODO
+        )
+        QuotedString(String)
+        ByteConstant(u8)
+        CharacterConstant(u32)
+        CCharacterConstant(c_char)
+        UnaryOp(
+            // TODO
+        )
+        BinaryOp(
+            // TODO
+        )
+        TupleLiteral([Reflect::Expression])
+        RangeLiteral(from: Reflect::Expression?, to: Reflect::Expression?)
+        ArrayLiteral(values: [Reflect::Expression], repeat: Reflect::Expression?)
+        SetLiteral(values: [Reflect::Expression])
+        DictionaryLiteral([(Reflect::Expression, Reflect::Expression)])
+        IndexedExpression(base: Reflect::Expression, index: Reflect::Expression)
+        IndexedDictionary(base: Reflect::Expression, key: Reflect::Expression)
+        IndexedTuple(base: Reflect::Expression, index: usize, is_optional: bool)
+        IndexedStruct(base: Reflect::Expression, name: String, is_optional: bool)
+        IndexedCommonEnumMember(base: Reflect::Expression, name: String, is_optional: bool)
+        ComptimeIndex(base: Reflect::Expression, index: Reflect::Expression, is_optional: bool)
+        Match(
+            // TODO
+        )
+        EnumVariantArg(
+            // TODO
+        )
+        Call(Reflect::Call)
+        MethodCall(this_expr: Reflect::Expression, call: Reflect::Call, is_optional: bool)
+        NamespacedVar(
+            // TODO
+        )
+        Var(
+            // TODO
+        )
+        OptionalNone
+        OptionalSome(Reflect::Expression)
+        ForcedUnwrap(Reflect::Expression)
+        Block([Reflect::Statement])
+        Function(
+            // TODO
+        )
+        DependentFunction(
+            // TODO
+        )
+        Must(
+            // TODO
+        )
+        Try(
+            // TODO
+        )
+        TryBlock(
+            // TODO
+        )
+        Reflect(type: Reflect::Type)
+    }
+    struct Call {
+        namespaces: [String]
+        name: String
+        args: [Reflect::Expression]
+        type_args: [Reflect::Type]
+        return_type: Reflect::Type
     }
     enum SumEnumVariant {
         StructLike(name: String, fields: [Reflect::Field])
