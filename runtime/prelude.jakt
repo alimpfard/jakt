@@ -216,12 +216,18 @@ namespace Reflect {
     }
     struct Function {
         name: String
-        // parameters: [Reflect::Parameter]
         generic_parameters: [String]
+        parameters: [Reflect::Parameter]
         // block: Reflect::Block
         return_type: Reflect::Type
         can_throw: bool
         is_comptime: bool
+    }
+    struct Parameter {
+        name: String
+        type: Reflect::Type
+        requires_label: bool
+        // default_value: Reflect::Expression?
     }
     enum SumEnumVariant {
         StructLike(name: String, fields: [Reflect::Field])
