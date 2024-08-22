@@ -1143,14 +1143,15 @@ struct Typechecker {
 
                             mut result: [(String, Span)] = []
                             for value in values {
-                                match value.impl {
-                                    JaktString(string) => result.push((string, value.span))
+                                let v = value.evaluated()
+                                match v.impl {
+                                    JaktString(string) => result.push((string, v.span))
                                     else => {
                                         .error_with_hint(
                                             message: "module name must evaluate to a string literal or an array of strings"
-                                            span: value.span
+                                            span: v.span
                                             hint: "this expression evaluates to an invalid value"
-                                            hint_span: value.span
+                                            hint_span: v.span
                                         )
                                     }
                                 }

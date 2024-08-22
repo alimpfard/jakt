@@ -2,10 +2,10 @@ import types {
     BinaryOperator, BlockControlFlow, BuiltinType, CheckedBlock, CheckedCall, CheckedEnum, CheckedEnumVariant
     CheckedExpression, CheckedField, CheckedFunction, CheckedMatchBody, CheckedNumericConstant, CheckedParameter
     CheckedProgram, CheckedStatement, CheckedStringLiteral, CheckedTypeCast, CheckedUnaryOperator, CheckedVariable
-    CheckedVisibility, EnumId, EnumVariantPatternArgument, FunctionGenerics, FunctionId, GenericInferences, ModuleId
-    NumericOrStringValue, ParsedStatement, ResolvedNamespace, SafetyMode, Scope, ScopeId, Span, StringLiteral
-    StructId, Type, TypeId, TypecheckFunctions, Value, ValueImpl, VarId, builtin, comptime_format_impl
-    unknown_type_id, void_type_id
+    CheckedVisibility, EnumId, EnumVariantPatternArgument, FunctionGenerics, FunctionId, GenericInferences
+    LazyValue, ModuleId, NumericOrStringValue, ParsedStatement, ResolvedNamespace, SafetyMode, Scope, ScopeId, Span
+    StringLiteral, StructId, Type, TypeId, TypecheckFunctions, UnevaluatedLazyValue, Value, ValueImpl, VarId
+    builtin, comptime_format_impl, unknown_type_id, void_type_id
 }
 import parser { FunctionLinkage, FunctionType, ParsedBlock, ParsedExpression }
 import utility { escape_for_quotes, interpret_escapes, panic }
@@ -58,6 +58,24 @@ type Target implements(TargetSize) {
             throw Error::from_string_literal("int size is unknown for this architecture")
         }
     }
+}
+
+fn as_evaluated(anon values: [Value]) -> [LazyValue] {
+    mut result: [LazyValue] = []
+    for value in values {
+        result.push(LazyValue::Evaluated(value))
+    }
+    return result
+}
+
+fn as_evaluated(anon value: Value) -> LazyValue {
+    return LazyValue::Evaluated(value)
+}
+
+fn as_unevaluated(anon mut f: fn() throws -> Value) -> LazyValue {
+    mut v: UnevaluatedLazyValue? = None
+    unsafe { cpp { "v = types::UnevaluatedLazyValue::__jakt_create(move(f));" } }
+    return LazyValue::Unevaluated(v!)
 }
 
 fn align_of_impl(
@@ -495,7 +513,7 @@ fn value_to_checked_expression(anon this_value: Value, anon mut interpreter: Int
     JaktTuple(fields, type_id) => {
         mut vals: [CheckedExpression] = []
         for field in fields {
-            vals.push(value_to_checked_expression(field, interpreter))
+            vals.push(value_to_checked_expression(field.evaluated(), interpreter))
         }
         yield CheckedExpression::JaktTuple(vals, span: this_value.span, type_id)
     }
@@ -510,7 +528,7 @@ fn value_to_checked_expression(anon this_value: Value, anon mut interpreter: Int
 
         mut materialised_fields: [CheckedExpression] = []
         for field in fields {
-            materialised_fields.push(value_to_checked_expression(field, interpreter))
+            materialised_fields.push(value_to_checked_expression(field.evaluated(), interpreter))
         }
 
         let struct_ = interpreter.program.get_struct(struct_id)
@@ -562,7 +580,7 @@ fn value_to_checked_expression(anon this_value: Value, anon mut interpreter: Int
     Enum(fields, enum_id, constructor) => {
         mut materialised_fields: [CheckedExpression] = []
         for field in fields {
-            materialised_fields.push(value_to_checked_expression(field, interpreter))
+            materialised_fields.push(value_to_checked_expression(field.evaluated(), interpreter))
         }
 
         let enum_ = interpreter.program.get_enum(enum_id)
@@ -612,7 +630,7 @@ fn value_to_checked_expression(anon this_value: Value, anon mut interpreter: Int
     JaktArray(values, type_id) => {
         mut vals: [CheckedExpression] = []
         for value in values {
-            vals.push(value_to_checked_expression(value, interpreter))
+            vals.push(value_to_checked_expression(value.evaluated(), interpreter))
         }
 
         let inner_type_id = match interpreter.program.get_type(type_id) {
@@ -630,12 +648,12 @@ fn value_to_checked_expression(anon this_value: Value, anon mut interpreter: Int
             inner_type_id
         )
     }
-    JaktDictionary(keys, values, type_id) => {
+    JaktDictionary(&mut keys, &mut values, type_id) => {
         mut vals: [(CheckedExpression, CheckedExpression)] = []
         for i in 0..keys.size() {
             vals.push((
-                value_to_checked_expression(keys[i], interpreter),
-                value_to_checked_expression(values[i], interpreter)
+                value_to_checked_expression(keys[i].evaluated(), interpreter),
+                value_to_checked_expression(values[i].evaluated(), interpreter)
             ))
         }
 
@@ -654,10 +672,10 @@ fn value_to_checked_expression(anon this_value: Value, anon mut interpreter: Int
             value_type_id
         )
     }
-    JaktSet(values, type_id) => {
+    JaktSet(&mut values, type_id) => {
         mut vals: [CheckedExpression] = []
         for i in 0..values.size() {
-            vals.push(value_to_checked_expression(values[i], interpreter))
+            vals.push(value_to_checked_expression(values[i].evaluated(), interpreter))
         }
 
         let value_type_id = match interpreter.program.get_type(type_id) {
@@ -1661,9 +1679,7 @@ class Interpreter {
                     yield StatementResult::JustValue(
                         Value(
                             impl: ValueImpl::Struct(
-                                fields: [
-                                    err
-                                ],
+                                fields: [LazyValue::Evaluated(err)],
                                 struct_id: error_struct_id
                                 constructor: constructors![0]
                             )
@@ -1680,9 +1696,7 @@ class Interpreter {
                     yield StatementResult::JustValue(
                         Value(
                             impl: ValueImpl::Struct(
-                                fields: [
-                                    err
-                                ],
+                                fields: [LazyValue::Evaluated(err)]
                                 struct_id: error_struct_id
                                 constructor: constructors![0]
                             )
@@ -1691,11 +1705,11 @@ class Interpreter {
                     )
                 }
                 "code" => match this_argument!.impl {
-                    Struct(fields) => match fields[0].impl {
+                    Struct(&mut fields) => match fields[0].evaluated().impl {
                         I32(code) => StatementResult::JustValue(Value(impl: ValueImpl::I32(code), span: call_span))
                         else => {
                             .error(
-                                format("Error should have `i32` as its code, but got {}", fields[0].impl),
+                                format("Error should have `i32` as its code, but got {}", fields[0].evaluated().impl),
                                 call_span
                             )
                             .compiler.panic("Invalid type")
@@ -1746,7 +1760,7 @@ class Interpreter {
                         Value(
                             impl: ValueImpl::Struct(
                                 fields: [
-                                    path_value
+                                    LazyValue::Evaluated(path_value)
                                 ],
                                 struct_id: file_struct_id
                                 constructor: constructors![0]
@@ -1783,7 +1797,7 @@ class Interpreter {
                         Value(
                             impl: ValueImpl::Struct(
                                 fields: [
-                                    path_value
+                                    LazyValue::Evaluated(path_value)
                                 ],
                                 struct_id: file_struct_id
                                 constructor: constructor![0]
@@ -1794,7 +1808,7 @@ class Interpreter {
                 }
                 "read_all" => {
                     let path = match this_argument!.impl {
-                        Struct(fields) => match fields[0].impl {
+                        Struct(&mut fields) => match fields[0].evaluated().impl {
                             JaktString(x) => x
                             else => {
                                 panic("invalid type for File::read_all")
@@ -1830,12 +1844,12 @@ class Interpreter {
                     }
 
                     mut file = File::open_for_reading(path)
-                    mut result_values: [Value] = []
+                    mut result_values: [LazyValue] = []
                     for byte in file.read_all() {
-                        result_values.push(Value(
+                        result_values.push(LazyValue::Evaluated(Value(
                             impl: ValueImpl::U8(byte)
                             span: call_span
-                        ))
+                        )))
                     }
                     let array_struct_id = .program.find_struct_in_prelude("Array")
 
@@ -1851,7 +1865,7 @@ class Interpreter {
                 }
                 "read" => {
                     let path = match this_argument!.impl {
-                        Struct(fields) => match fields[0].impl {
+                        Struct(&mut fields) => match fields[0].evaluated().impl {
                             JaktString(x) => x
                             else => {
                                 panic("invalid type for File::read")
@@ -1898,10 +1912,10 @@ class Interpreter {
                     let bytes_read = file.read(byte_buffer)
 
                     for i in 0..byte_buffer.size() {
-                        values_buffer[i] = Value(
+                        values_buffer[i] = LazyValue::Evaluated(Value(
                             impl: ValueImpl::U8(byte_buffer[i])
                             span: call_span
-                        )
+                        ))
                     }
 
                     yield StatementResult::JustValue(
@@ -1933,7 +1947,7 @@ class Interpreter {
                 }
                 "write" => {
                     let path = match this_argument!.impl {
-                        Struct(fields) => match fields[0].impl {
+                        Struct(&mut fields) => match fields[0].evaluated().impl {
                             JaktString(x) => x
                             else => {
                                 panic("invalid type for File::write")
@@ -1979,9 +1993,9 @@ class Interpreter {
                     }
                     mut data: [u8] = []
                     for val in data_values {
-                        data.push(match val.impl {
+                        data.push(match val.evaluated().impl {
                             U8(x) => x
-                            else => {panic("expected byte")}
+                            else => { panic("expected byte") }
                         })
                     }
                     let bytes_written = file.write(data)
@@ -2007,7 +2021,7 @@ class Interpreter {
                     yield StatementResult::JustValue(
                         Value(
                             impl: ValueImpl::Struct(
-                                fields: [Value(impl: ValueImpl::JaktString(""), span: call_span)],
+                                fields: [LazyValue::Evaluated(Value(impl: ValueImpl::JaktString(""), span: call_span))],
                                 struct_id: string_builder_struct_id,
                                 constructor: None
                             )
@@ -2017,7 +2031,7 @@ class Interpreter {
                 }
                 "append" | "append_code_point" | "append_escaped_for_json" => {
                     mut (fields, current_string) = match this_argument!.impl {
-                        Struct(fields) => match fields[0].impl {
+                        Struct(&mut fields) => match fields[0].evaluated().impl {
                             JaktString(value) => (fields, value)
                             else => {
                                 panic("Invalid use of prelude StringBuilder")
@@ -2064,17 +2078,17 @@ class Interpreter {
                         }
                     }
 
-                    fields[0] = Value(
+                    fields[0] = LazyValue::Evaluated(Value(
                         impl: ValueImpl::JaktString(builder.to_string())
                         span: call_span
-                    )
+                    ))
 
                     yield StatementResult::JustValue(
                         Value(impl: ValueImpl::Void, span: call_span)
                     )
                 }
                 "to_string" => match this_argument!.impl {
-                    Struct(fields) => StatementResult::JustValue(fields[0])
+                    Struct(&mut fields) => StatementResult::JustValue(fields[0].evaluated())
                     else => {
                         .error(
                             format("Prelude function `StringBuilder::{}` expects a StringBuilder as its this argument", prelude_function),
@@ -2084,7 +2098,7 @@ class Interpreter {
                     }
                 }
                 "is_empty" => match this_argument!.impl {
-                    Struct(fields) => match fields[0].impl {
+                    Struct(&mut fields) => match fields[0].evaluated().impl {
                         JaktString(value) => StatementResult::JustValue(Value(impl: ValueImpl::Bool(value.is_empty()), span: call_span))
                         else => {
                             panic("Invalid use of prelude StringBuilder")
@@ -2099,7 +2113,7 @@ class Interpreter {
                     }
                 }
                 "length" => match this_argument!.impl {
-                    Struct(fields) => match fields[0].impl {
+                    Struct(&mut fields) => match fields[0].evaluated().impl {
                         JaktString(value) => StatementResult::JustValue(Value(impl: ValueImpl::USize(value.length()), span: call_span))
                         else => {
                             panic("Invalid use of prelude StringBuilder")
@@ -2114,9 +2128,8 @@ class Interpreter {
                     }
                 }
                 "clear" => match this_argument!.impl {
-                    Struct(fields) => {
-                        mut mutable_fields = fields
-                        mutable_fields[0].impl = ValueImpl::JaktString(value: "")
+                    Struct(&mut fields) => {
+                        fields[0] = LazyValue::Evaluated(Value(impl: ValueImpl::JaktString(value: ""), span: call_span))
                         yield StatementResult::JustValue(Value(impl: ValueImpl::Void, span: call_span))
                     }
                     else => {
@@ -2153,10 +2166,10 @@ class Interpreter {
                     ))
                 }
                 "get" => match this_argument!.impl {
-                    JaktDictionary(keys, values) => {
+                    JaktDictionary(&mut keys, &mut values) => {
                         mut found_index: usize? = None
                         for i in 0..keys.size() {
-                            if keys[i].impl.equals(arguments[0].impl) {
+                            if keys[i].evaluated().impl.equals(arguments[0].impl) {
                                 found_index = i
                                 break
                             }
@@ -2164,7 +2177,7 @@ class Interpreter {
 
                         yield StatementResult::JustValue(match found_index.has_value() {
                             true => Value(
-                                impl: ValueImpl::OptionalSome(value: values[found_index!])
+                                impl: ValueImpl::OptionalSome(value: values[found_index!].evaluated())
                                 span: call_span
                             )
                             else => Value(
@@ -2178,23 +2191,20 @@ class Interpreter {
                     }
                 }
                 "set" => match this_argument!.impl {
-                    JaktDictionary(keys, values) => {
+                    JaktDictionary(&mut keys, &mut values) => {
                         mut found_index: usize? = None
                         for i in 0..keys.size() {
-                            if keys[i].impl.equals(arguments[0].impl) {
+                            if keys[i].evaluated().impl.equals(arguments[0].impl) {
                                 found_index = i
                                 break
                             }
                         }
 
-                        mut mutable_keys = keys
-                        mut mutable_values = values
-
                         if found_index.has_value() {
-                            mutable_values[found_index!] = arguments[1]
+                            values[found_index!] = LazyValue::Evaluated(arguments[1])
                         } else {
-                            mutable_keys.push(arguments[0])
-                            mutable_values.push(arguments[1])
+                            keys.push(LazyValue::Evaluated(arguments[0]))
+                            values.push(LazyValue::Evaluated(arguments[1]))
                         }
 
                         yield StatementResult::JustValue(Value(
@@ -2216,10 +2226,10 @@ class Interpreter {
                     }
                 }
                 "contains" => match this_argument!.impl {
-                    JaktDictionary(keys) => {
+                    JaktDictionary(&mut keys) => {
                         mut found = false
                         for i in 0..keys.size() {
-                            if keys[i].impl.equals(arguments[0].impl) {
+                            if keys[i].evaluated().impl.equals(arguments[0].impl) {
                                 found = true
                                 break
                             }
@@ -2236,17 +2246,17 @@ class Interpreter {
                     }
                 }
                 "remove" => match this_argument!.impl {
-                    JaktDictionary(keys, values) => {
+                    JaktDictionary(&mut keys, &mut values) => {
                         mut found_index: usize? = None
                         for i in 0..keys.size() {
-                            if keys[i].impl.equals(arguments[0].impl) {
+                            if keys[i].evaluated().impl.equals(arguments[0].impl) {
                                 found_index = i
                                 break
                             }
                         }
                         if found_index.has_value() {
-                            mut keys_without: [Value] = []
-                            mut values_without: [Value] = []
+                            mut keys_without: [LazyValue] = []
+                            mut values_without: [LazyValue] = []
 
                             for i in 0..keys.size() {
                                 if i == found_index! {
@@ -2256,14 +2266,10 @@ class Interpreter {
                                 values_without.push(values[i])
                             }
 
-                            mut mutable_keys = keys
-                            mut mutable_values = values
-                            mutable_keys.shrink(0)
-                            mutable_values.shrink(0)
-                            for i in 0..keys_without.size() {
-                                mutable_keys.push(keys_without[i])
-                                mutable_values.push(values_without[i])
-                            }
+                            keys.shrink(0)
+                            keys.push_values(&keys_without)
+                            values.shrink(0)
+                            values.push_values(&values_without)
                         }
 
                         yield StatementResult::JustValue(Value(
@@ -2361,11 +2367,11 @@ class Interpreter {
                             Value(
                                 impl: ValueImpl::Struct(
                                     fields: [
-                                        this_argument!
-                                        Value(
+                                        LazyValue::Evaluated(this_argument!)
+                                        LazyValue::Evaluated(Value(
                                             impl: ValueImpl::USize(0uz)
                                             span: call_span
-                                        )
+                                        ))
                                     ]
                                     struct_id
                                     constructor: None
@@ -2394,11 +2400,11 @@ class Interpreter {
                             Value(
                                 impl: ValueImpl::Struct(
                                     fields: [
-                                        this_argument!
-                                        Value(
+                                        LazyValue::Evaluated(this_argument!)
+                                        LazyValue::Evaluated(Value(
                                             impl: ValueImpl::USize(0uz)
                                             span: call_span
-                                        )
+                                        ))
                                     ]
                                     struct_id
                                     constructor: None
@@ -2425,9 +2431,8 @@ class Interpreter {
                     }
                 }
                 "push" => match this_argument!.impl {
-                    JaktArray(values) => {
-                        mut mutable_values = values
-                        mutable_values.push(arguments[0])
+                    JaktArray(&mut values) => {
+                        values.push(LazyValue::Evaluated(arguments[0]))
                         yield StatementResult::JustValue(
                             Value(
                                 impl: ValueImpl::Void,
@@ -2440,12 +2445,11 @@ class Interpreter {
                     }
                 }
                 "push_values" => match this_argument!.impl {
-                    JaktArray(values) => {
-                        mut mutable_values = values
+                    JaktArray(&mut values) => {
                         match arguments[0].impl {
-                            JaktArray(values) => {
-                                for value in values {
-                                    mutable_values.push(value)
+                            JaktArray(values: values_to_push) => {
+                                for value in values_to_push {
+                                    values.push(value)
                                 }
                             }
                             else => .error("Only argument to push_values needs to be another Array", call_span)
@@ -2459,11 +2463,10 @@ class Interpreter {
                     }
                 }
                 "pop" => match this_argument!.impl {
-                    JaktArray(values) => {
-                        mut mutable_values = values
-                        let value = mutable_values.pop()
+                    JaktArray(&mut values) => {
+                        mut value = values.pop()
                         yield match value.has_value() {
-                            true => StatementResult::JustValue(value!)
+                            true => StatementResult::JustValue(value!.evaluated())
                             false => StatementResult::JustValue(Value(impl: ValueImpl::OptionalNone, span: call_span))
                         }
                     }
@@ -2472,11 +2475,10 @@ class Interpreter {
                     }
                 }
                 "first" => match this_argument!.impl {
-                    JaktArray(values) => {
-                        mut mutable_values = values
-                        let value = mutable_values.first()
+                    JaktArray(&mut values) => {
+                        mut value = values.first()
                         yield match value.has_value() {
-                            true => StatementResult::JustValue(value!)
+                            true => StatementResult::JustValue(value!.evaluated())
                             false => StatementResult::JustValue(Value(impl: ValueImpl::OptionalNone, span: call_span))
                         }
                     }
@@ -2485,11 +2487,10 @@ class Interpreter {
                     }
                 }
                 "last" => match this_argument!.impl {
-                    JaktArray(values) => {
-                        mut mutable_values = values
-                        let value = mutable_values.last()
+                    JaktArray(&mut values) => {
+                        mut value = values.last()
                         yield match value.has_value() {
-                            true => StatementResult::JustValue(value!)
+                            true => StatementResult::JustValue(value!.evaluated())
                             false => StatementResult::JustValue(Value(impl: ValueImpl::OptionalNone, span: call_span))
                         }
                     }
@@ -2498,10 +2499,10 @@ class Interpreter {
                     }
                 }
                 "contains" => match this_argument!.impl {
-                    JaktArray(values) => {
+                    JaktArray(&mut values) => {
                         mut found = false
                         for value in values {
-                            if value.impl.equals(arguments[0].impl) {
+                            if value.evaluated().impl.equals(arguments[0].impl) {
                                 found = true
                                 break
                             }
@@ -2614,22 +2615,21 @@ class Interpreter {
             }
             "ArrayIterator" => match prelude_function {
                 "next" => match this_argument!.impl {
-                    Struct(fields) => {
-                        let index = match fields[1].impl {
+                    Struct(&mut fields) => {
+                        let index = match fields[1].evaluated().impl {
                             USize(value) => value
                             else => {
                                 panic("Invalid ArrayIterator index configuration")
                             }
                         }
-                        mut mutable_fields = fields
-                        yield StatementResult::JustValue(match fields[0].impl {
-                            JaktArray(values) => match values.size() > index {
+                        yield StatementResult::JustValue(match fields[0].evaluated().impl {
+                            JaktArray(&mut values) => match values.size() > index {
                                 true => {
-                                    mutable_fields[1] = Value(
+                                    fields[1] = LazyValue::Evaluated(Value(
                                         impl: ValueImpl::USize(index + 1)
                                         span: call_span
-                                    )
-                                    yield Value(impl: ValueImpl::OptionalSome(value: values[index]), span: call_span)
+                                    ))
+                                    yield Value(impl: ValueImpl::OptionalSome(value: values[index].evaluated()), span: call_span)
                                 }
                                 else => Value(impl: ValueImpl::OptionalNone, span: call_span)
                             }
@@ -2660,14 +2660,14 @@ class Interpreter {
                         }
                     }
 
-                    let start = match fields[0].impl {
+                    let start = match fields[0].evaluated().impl {
                         I8(x) | I16(x) | I32(x) | I64(x) | U8(x) | U16(x) | U32(x) | U64(x) | USize(x) => x as! u64
                         else => {
                             panic("Invalid type for comptime range")
                         }
                     }
 
-                    let end = match fields[1].impl {
+                    let end = match fields[1].evaluated().impl {
                         I8(x) | I16(x) | I32(x) | I64(x) | U8(x) | U16(x) | U32(x) | U64(x) | USize(x) => x as! u64
                         else => {
                             panic("Invalid type for comptime range")
@@ -2679,15 +2679,15 @@ class Interpreter {
                     }
 
                     if start > end {
-                        fields[0] = Value(
+                        fields[0] = LazyValue::Evaluated(Value(
                             impl: ValueImpl::U64(start - 1)
                             span: call_span
-                        )
+                        ))
                     } else {
-                        fields[0] = Value(
+                        fields[0] = LazyValue::Evaluated(Value(
                             impl: ValueImpl::U64(start + 1)
                             span: call_span
-                        )
+                        ))
                     }
 
                     yield StatementResult::JustValue(
@@ -2701,15 +2701,14 @@ class Interpreter {
                     )
                 }
                 "inclusive" => match this_argument!.impl {
-                    Struct(fields, struct_id, constructor) => {
-                        mut mutable_fields = fields
-                        let end = match fields[1].impl {
+                    Struct(&mut fields, struct_id, constructor) => {
+                        let end = match fields[1].evaluated().impl {
                             I8(x) | I16(x) | I32(x) | I64(x) | U8(x) | U16(x) | U32(x) | U64(x) | USize(x) => x as! u64
                             else => {
                                 panic("Invalid type for comptime range")
                             }
                         }
-                        mutable_fields[1].impl =  ValueImpl::U64(end + 1)
+                        fields[1] = LazyValue::Evaluated(Value(impl: ValueImpl::U64(end + 1), span: this_argument!.span))
                         yield StatementResult::JustValue(Value(impl: ValueImpl::Struct(fields, struct_id, constructor), span: this_argument!.span))
                     }
                     else => {
@@ -2890,9 +2889,9 @@ class Interpreter {
                     JaktString(value) => match arguments[0].impl {
                         CChar(c) => {
                             let values = value.split(c)
-                            mut result: [Value] = []
+                            mut result: [LazyValue] = []
                             for value in values {
-                                result.push(Value(impl: ValueImpl::JaktString(value), span: call_span))
+                                result.push(LazyValue::Evaluated(Value(impl: ValueImpl::JaktString(value), span: call_span)))
                             }
                             let array_struct_id = .program.find_struct_in_prelude("Array")
                             yield StatementResult::JustValue(Value(
@@ -2987,10 +2986,10 @@ class Interpreter {
                     }
                 }
                 "contains" => match this_argument!.impl {
-                    JaktSet(values) => {
+                    JaktSet(&mut values) => {
                         mut found = false
                         for i in 0..values.size() {
-                            if values[i].impl.equals(arguments[0].impl) {
+                            if values[i].evaluated().impl.equals(arguments[0].impl) {
                                 found = true
                                 break
                             }
@@ -3002,9 +3001,8 @@ class Interpreter {
                     }
                 }
                 "add" => match this_argument!.impl {
-                    JaktSet(values) => {
-                        mut mutable_values = values
-                        mutable_values.push(arguments[0])
+                    JaktSet(&mut values) => {
+                        values.push(LazyValue::Evaluated(arguments[0]))
                         yield StatementResult::JustValue(
                             Value(
                                 impl: ValueImpl::Void,
@@ -3017,21 +3015,18 @@ class Interpreter {
                     }
                 }
                 "remove" => match this_argument!.impl {
-                    JaktSet(values) => {
+                    JaktSet(&mut values) => {
                         mut found = false
-                        mut values_without: [Value] = []
+                        mut values_without: [LazyValue] = []
                         for i in 0..values.size() {
-                            if values[i].impl.equals(arguments[0].impl) {
+                            if values[i].evaluated().impl.equals(arguments[0].impl) {
                                 found = true
                                 continue
                             }
                             values_without.push(values[i])
                         }
-                        mut mutable_values = values
-                        mutable_values.shrink(0)
-                        for i in 0..values_without.size() {
-                            mutable_values.push(values_without[i])
-                        }
+                        values.shrink(0)
+                        values.push_values(&values_without)
                         yield StatementResult::JustValue(
                             Value(
                                 impl: ValueImpl::Bool(found),
@@ -3108,11 +3103,11 @@ class Interpreter {
                             Value(
                                 impl: ValueImpl::Struct(
                                     fields: [
-                                        this_argument!
-                                        Value(
+                                        LazyValue::Evaluated(this_argument!)
+                                        LazyValue::Evaluated(Value(
                                             impl: ValueImpl::USize(0uz)
                                             span: call_span
-                                        )
+                                        ))
                                     ]
                                     struct_id
                                     constructor: None
@@ -3135,22 +3130,21 @@ class Interpreter {
             }
             "SetIterator" => match prelude_function {
                 "next" => match this_argument!.impl {
-                    Struct(fields) => {
-                        let index = match fields[1].impl {
+                    Struct(&mut fields) => {
+                        let index = match fields[1].evaluated().impl {
                             USize(value) => value
                             else => {
                                 panic("Invalid SetIterator index configuration")
                             }
                         }
-                        mut mutable_fields = fields
-                        yield StatementResult::JustValue(match fields[0].impl {
-                            JaktSet(values) => match values.size() > index {
+                        yield StatementResult::JustValue(match fields[0].evaluated().impl {
+                            JaktSet(&mut values) => match values.size() > index {
                                 true => {
-                                    mutable_fields[1] = Value(
+                                    fields[1] = LazyValue::Evaluated(Value(
                                         impl: ValueImpl::USize(index + 1)
                                         span: call_span
-                                    )
-                                    yield Value(impl: ValueImpl::OptionalSome(value: values[index]), span: call_span)
+                                    ))
+                                    yield Value(impl: ValueImpl::OptionalSome(value: values[index].evaluated()), span: call_span)
                                 }
                                 else => Value(impl: ValueImpl::OptionalNone, span: call_span)
                             }
@@ -3173,21 +3167,20 @@ class Interpreter {
             }
             "DictionaryIterator" => match prelude_function {
                 "next" => match this_argument!.impl {
-                    Struct(fields) => {
-                        let index = match fields[1].impl {
+                    Struct(&mut fields) => {
+                        let index = match fields[1].evaluated().impl {
                             USize(value) => value
                             else => {
                                 panic("Invalid DictionaryIterator index configuration")
                             }
                         }
-                        mut mutable_fields = fields
-                        yield StatementResult::JustValue(match fields[0].impl {
+                        yield StatementResult::JustValue(match fields[0].evaluated().impl {
                             JaktDictionary(keys, values, type_id) => match keys.size() > index and values.size() > index {
                                 true => {
-                                    mutable_fields[1] = Value(
+                                    fields[1] = LazyValue::Evaluated(Value(
                                         impl: ValueImpl::USize(index + 1)
                                         span: call_span
-                                    )
+                                    ))
                                     let generics = match .program.get_type(type_id) {
                                         GenericInstance(args) => args
                                         else => {
@@ -3613,12 +3606,12 @@ class Interpreter {
                         let constructor = function_to_run_id
                         let impl = match struct_.record_type {
                             Struct => ValueImpl::Struct(
-                                fields: arguments
+                                fields: as_evaluated(arguments)
                                 struct_id
                                 constructor
                             )
                             Class => ValueImpl::Class(
-                                fields: arguments
+                                fields: as_evaluated(arguments)
                                 struct_id
                                 constructor
                             )
@@ -3651,7 +3644,7 @@ class Interpreter {
                         let enum_ = .program.get_enum(enum_id)
                         let constructor = function_to_run_id
                         let impl = ValueImpl::Enum(
-                            fields: arguments
+                            fields: as_evaluated(arguments)
                             enum_id
                             constructor
                         )
@@ -5575,7 +5568,7 @@ class Interpreter {
                     }
                 }
 
-                fields[field_index] = value
+                fields[field_index] = LazyValue::Evaluated(value)
             }
             IndexedCommonEnumMember(expr, index) => {
                 // FIXME: This should not be evaluated twice.
@@ -5600,7 +5593,7 @@ class Interpreter {
                     }
                 }
 
-                fields[field_index] = value
+                fields[field_index] = LazyValue::Evaluated(value)
             }
             else => {
                 .error(
@@ -6135,7 +6128,7 @@ class Interpreter {
 
             yield StatementResult::JustValue(Value(
                 impl: ValueImpl::Struct(
-                    fields: [start, end]
+                    fields: as_evaluated([start, end])
                     struct_id: range_struct_id
                     constructor: range_constructors[0]
                 )
@@ -6469,7 +6462,7 @@ class Interpreter {
             }
 
             yield match value.impl {
-                JaktArray(values) => {
+                JaktArray(&mut values) => {
                     let numeric_index = match index.impl {
                         I8(x) | I16(x) | I32(x) | I64(x) | U8(x) | U16(x) | U32(x) | U64(x) | USize(x) => x as! u64
                         else => {
@@ -6484,7 +6477,7 @@ class Interpreter {
                         return StatementResult::Throw(.error_value("Invalid type", span))
                     }
 
-                    yield StatementResult::JustValue(values[numeric_index])
+                    yield StatementResult::JustValue(values[numeric_index].evaluated())
                 }
                 else => {
                     .error("Invalid or unsupported indexed expression", span)
@@ -6513,8 +6506,8 @@ class Interpreter {
                 }
             }
             yield match value.impl {
-                Struct(fields, struct_id)
-                | Class(fields, struct_id) => {
+                Struct(&mut fields, struct_id)
+                | Class(&mut fields, struct_id) => {
                     let struct_ = .program.get_struct(struct_id)
                     mut idx = 0
                     mut found_index: i64? = None
@@ -6530,7 +6523,7 @@ class Interpreter {
                         .compiler.panic("Invalid type")
                     }
 
-                    yield StatementResult::JustValue(fields[found_index!])
+                    yield StatementResult::JustValue(fields[found_index!].evaluated())
                 }
                 else => {
                     .error("Attempted to access a field on a non-struct/enum type", value.span)
@@ -6558,7 +6551,7 @@ class Interpreter {
                 }
             }
             yield match value.impl {
-                Enum(fields, enum_id) => {
+                Enum(&mut fields, enum_id) => {
                     let enum_ = .program.get_enum(enum_id)
                     mut idx = 0
                     mut found_index: i64? = None
@@ -6574,7 +6567,7 @@ class Interpreter {
                         .compiler.panic("Invalid type")
                     }
 
-                    yield StatementResult::JustValue(fields[found_index!])
+                    yield StatementResult::JustValue(fields[found_index!].evaluated())
                 }
                 else => {
                     .error("Attempted to access a field on a non-struct/enum type", value.span)
@@ -6629,8 +6622,8 @@ class Interpreter {
 
             yield StatementResult::JustValue(Value(
                 impl: ValueImpl::JaktDictionary(
-                    keys
-                    values
+                    keys: as_evaluated(keys)
+                    values: as_evaluated(values)
                     type_id
                 )
                 span: span
@@ -6753,7 +6746,7 @@ class Interpreter {
                 }
                 yield StatementResult::JustValue(Value(
                     impl: ValueImpl::JaktArray(
-                        values: [value_to_repeat; count]
+                        values: as_evaluated([value_to_repeat; count])
                         type_id: .program.substitute_typevars_in_type(
                             type_id
                             generic_inferences: scope.type_map_for_substitution()
@@ -6787,7 +6780,7 @@ class Interpreter {
                 }
                 yield StatementResult::JustValue(Value(
                     impl: ValueImpl::JaktArray(
-                        values
+                        values: as_evaluated(values)
                         type_id: .program.substitute_typevars_in_type(
                             type_id
                             generic_inferences: scope.type_map_for_substitution()
@@ -6816,11 +6809,13 @@ class Interpreter {
                     panic("Invalid control flow")
                 }
             }
-            guard value.impl is JaktTuple(fields) else {
+            guard value.impl is JaktTuple(&mut fields) else {
                 panic("expected tuple")
             }
 
-            yield StatementResult::JustValue(fields[index])
+            mut f = fields // HACK: &mut fields doesn't make a mutable binding
+
+            yield StatementResult::JustValue(f[index].evaluated())
         }
         Match(expr, match_cases, all_variants_constant, span) => {
             let value = match .execute_expression(expr, scope) {
@@ -6842,7 +6837,7 @@ class Interpreter {
                 }
             }
             yield match value.impl {
-                Enum(fields,  enum_id, constructor) => {
+                Enum(&mut fields,  enum_id, constructor) => {
                     let constructor_name = .program.get_function(constructor).name
 
                     mut catch_all_case: CheckedMatchBody? = None
@@ -6901,7 +6896,7 @@ class Interpreter {
                                 if found_args!.size() > 0 {
                                     new_scope.bindings.set(
                                         found_args![0].binding
-                                        fields[0]
+                                        fields[0].evaluated()
                                     )
                                 }
                             }
@@ -6914,7 +6909,7 @@ class Interpreter {
                                         if matched_name == field.name {
                                             new_scope.bindings.set(
                                                 arg.binding
-                                                fields[i]
+                                                fields[i].evaluated()
                                             )
                                             break
                                         }
@@ -7046,7 +7041,7 @@ class Interpreter {
                 }
             }
             yield match value.impl {
-                Enum(fields,  enum_id, constructor) => {
+                Enum(&mut fields,  enum_id, constructor) => {
                     mut found_variant: CheckedEnumVariant? = None
                     for variant in .program.get_enum(enum_id).variants {
                         if variant.name() == enum_variant.name() {
@@ -7056,7 +7051,7 @@ class Interpreter {
                     }
 
                     yield match found_variant! {
-                        Typed => StatementResult::JustValue(fields[0])
+                        Typed => StatementResult::JustValue(fields[0].evaluated())
                         StructLike(fields: variant_fields) => {
                             mut i = 0
                             for var_id in variant_fields {
@@ -7067,7 +7062,7 @@ class Interpreter {
                                 }
                                 i += 1
                             }
-                            yield StatementResult::JustValue(fields[i])
+                            yield StatementResult::JustValue(fields[i].evaluated())
                         }
                         else => StatementResult::JustValue(Value(impl: ValueImpl::Void, span))
                     }
@@ -7103,7 +7098,7 @@ class Interpreter {
                 }
                 fields.push(value)
             }
-            yield StatementResult::JustValue(Value(impl: ValueImpl::JaktTuple(fields, type_id), span))
+            yield StatementResult::JustValue(Value(impl: ValueImpl::JaktTuple(fields: as_evaluated(fields), type_id), span))
         }
         JaktSet(vals, span, type_id) => {
             mut values: [Value] = []
@@ -7132,7 +7127,7 @@ class Interpreter {
 
             yield StatementResult::JustValue(Value(
                 impl: ValueImpl::JaktSet(
-                    values
+                    values: as_evaluated(values)
                     type_id
                 )
                 span: span
@@ -7284,7 +7279,7 @@ class Interpreter {
         return .find_or_add_type_id(type)
     }
 
-    public fn array_value_of_type(mut this, values: [Value], type: TypeId, span: Span) throws -> Value {
+    public fn array_value_of_type(mut this, values: [LazyValue], type: TypeId, span: Span) throws -> Value {
         let array_struct_id = .program.find_struct_in_prelude("Array")
         let array_type = Type::GenericInstance(
             id: array_struct_id
@@ -7310,7 +7305,7 @@ class Interpreter {
         return .find_or_add_type_id(type)
     }
 
-    public fn tuple_value(mut this, members: [Value], type: TypeId, span: Span) throws -> Value {
+    public fn tuple_value(mut this, members: [LazyValue], type: TypeId, span: Span) throws -> Value {
         return Value(
             impl: ValueImpl::JaktTuple(
                 fields: members
@@ -7333,7 +7328,7 @@ class Interpreter {
         )!
         return Value(
             impl: ValueImpl::Struct(
-                fields: [.string_value(string, span)]
+                fields: as_evaluated([.string_value(string, span)])
                 struct_id
                 constructor
             )
@@ -7427,19 +7422,19 @@ class Interpreter {
         for (name, ids) in scope.functions {
             for id in ids {
                 let function = .program.get_function(id)
-                mut parameters: [Value] = []
-                mut statements: [Value] = []
+                mut parameters: [LazyValue] = []
+                mut statements: [LazyValue] = []
 
                 for param in function.params {
                     let p = Value(
                         impl: ValueImpl::Struct(
                             fields: [
                                 // name:
-                                .string_value(param.variable.name, span)
+                                as_evaluated(.string_value(param.variable.name, span))
                                 // type:
-                                .reflect_type(type_id: param.variable.type_id, span, scope: interpreter_scope)
+                                as_unevaluated(fn[this, param, span, interpreter_scope]() throws -> Value => .reflect_type(type_id: param.variable.type_id, span, scope: interpreter_scope))
                                 // requires_label:
-                                .bool_value(param.requires_label, span)
+                                as_evaluated(.bool_value(param.requires_label, span))
                             ]
                             struct_id: parameter_type_id
                             constructor: parameter_struct_constructor
@@ -7447,42 +7442,42 @@ class Interpreter {
                         span
                     )
 
-                    parameters.push(p)
+                    parameters.push(as_evaluated(p))
                 }
 
                 for stmt in function.block.statements {
-                    statements.push(.reflect_statement(stmt, span, scope: interpreter_scope, statement_enum_id, expression_enum_id))
+                    statements.push(as_unevaluated(fn[this, stmt, span, interpreter_scope, statement_enum_id, expression_enum_id]() throws -> Value => .reflect_statement(stmt, span, scope: interpreter_scope, statement_enum_id, expression_enum_id)))
                 }
 
                 let value = Value(
                     impl: ValueImpl::Struct(
                         fields: [
                             // name:
-                            .string_value(name, span)
+                            as_evaluated(.string_value(name, span))
                             // generic_parameters:
-                            .array_value_of_type(
+                            as_evaluated(.array_value_of_type(
                                 values: []
                                 type: type_type_id
                                 span
-                            )
+                            ))
                             // parameters:
-                            .array_value_of_type(
+                            as_evaluated(.array_value_of_type(
                                 values: parameters
                                 type: .array_type_of_struct(parameter_type_id)
                                 span
-                            )
+                            ))
                             // return_type:
-                            .reflect_type(type_id: function.return_type_id, span, scope: interpreter_scope)
+                            as_unevaluated(fn[this, function, span, interpreter_scope]() throws -> Value => .reflect_type(type_id: function.return_type_id, span, scope: interpreter_scope))
                             // can_throw:
-                            .bool_value(function.can_throw, span)
+                            as_evaluated(.bool_value(function.can_throw, span))
                             // is_comptime:
-                            .bool_value(function.is_comptime, span)
+                            as_evaluated(.bool_value(function.is_comptime, span))
                             // block:
-                            .array_value_of_type(
+                            as_evaluated(.array_value_of_type(
                                 values: statements
                                 type: .array_type_of_enum(statement_enum_id)
                                 span
-                            )
+                            ))
                         ]
                         struct_id: function_struct_id
                         constructor: function_struct_constructor
@@ -7494,7 +7489,7 @@ class Interpreter {
                     impl: ValueImpl::Struct(
                         fields: [
                             // function:
-                            value
+                            as_evaluated(value)
                             // visibility:
                             // FIXME.
                         ]
@@ -7508,7 +7503,7 @@ class Interpreter {
 
         return Value(
             impl: ValueImpl::JaktArray(
-                values: method_values
+                values: as_evaluated(method_values)
                 type_id: .array_type_of_struct(method_struct_id)
             )
             span
@@ -7558,17 +7553,17 @@ class Interpreter {
                 impl: ValueImpl::Struct(
                     fields: [
                         // name:
-                        Value(
+                        as_evaluated(Value(
                             impl: ValueImpl::JaktString(field.name)
                             span
-                        )
+                        ))
                         // type:
-                        .reflect_type(type_id: field.type_id, span, scope)
+                        as_unevaluated(fn[this, field, span, scope]() throws -> Value => .reflect_type(type_id: field.type_id, span, scope))
                         // is_mutable:
-                        Value(
+                        as_evaluated(Value(
                             impl: ValueImpl::Bool(field.is_mutable)
                             span
-                        )
+                        ))
                     ]
                     struct_id: variable_declaration_struct_id
                     constructor: variable_declaration_struct_constructor
@@ -7579,9 +7574,9 @@ class Interpreter {
                 impl: ValueImpl::Struct(
                     fields: [
                         // variable:
-                        variable
+                        as_evaluated(variable)
                         // visibility:
-                        Value(
+                        as_evaluated(Value(
                             impl: ValueImpl::Enum(
                                 fields: []
                                 enum_id: visibility_enum_id
@@ -7594,7 +7589,7 @@ class Interpreter {
                                 }
                             )
                             span
-                        )
+                        ))
                     ]
                     struct_id: field_struct_id
                     constructor: field_struct_constructor
@@ -7610,11 +7605,11 @@ class Interpreter {
     public fn reflect_value_enum_variants(mut this, subject_enum: CheckedEnum, span: Span, scope: InterpreterScope) throws -> [Value] {
         // [String], names of the variants
         let type = .array_type_of_struct(.program.find_struct_in_prelude("String"))
-        mut result_elements: [Value] = []
+        mut result_elements: [LazyValue] = []
         for entry in subject_enum.variants {
             match entry {
                 Untyped(name) | WithValue(name) => {
-                    result_elements.push(.string_value(name, span))
+                    result_elements.push(as_evaluated(.string_value(name, span)))
                 }
                 else => {
                     .error("Expected untyped or with-value variant", span)
@@ -7654,12 +7649,12 @@ class Interpreter {
         for variant in subject_enum.variants.iterator() {
             match variant {
                 Typed(name, type_id) => {
-                    let type_value = .reflect_type(type_id: type_id, span, scope)
+                    let type_value = as_unevaluated(fn[this, type_id, span, scope]() throws -> Value => .reflect_type(type_id, span, scope))
                     let variant_value = Value(
                         impl: ValueImpl::Enum(
                             fields: [
                                 // name:
-                                .string_value(name, span)
+                                as_evaluated(.string_value(name, span))
                                 // type:
                                 type_value
                             ]
@@ -7675,7 +7670,7 @@ class Interpreter {
                         impl: ValueImpl::Enum(
                             fields: [
                                 // name:
-                                .string_value(name, span)
+                                as_evaluated(.string_value(name, span))
                             ]
                             enum_id: sum_enum_variant_enum_id
                             constructor: untyped_variant_constructor
@@ -7685,17 +7680,17 @@ class Interpreter {
                     result.push(variant_value)
                 }
                 StructLike(name, fields) => {
-                    let reflected_fields = .reflect_fields(fields, span, scope)
+                    let reflected_fields = as_evaluated(.reflect_fields(fields, span, scope))
                     let variant_value = Value(
                         impl: ValueImpl::Enum(
                             fields: [
                                 // name:
-                                .string_value(name, span)
+                                as_evaluated(.string_value(name, span))
                                 // fields:
-                                .array_value_of_type(
+                                as_evaluated(.array_value_of_type(
                                     values: reflected_fields
                                     type: .array_type_of_struct(field_struct_id)
-                                    span)
+                                    span))
                             ]
                             enum_id: sum_enum_variant_enum_id
                             constructor: struct_like_variant_constructor
@@ -7735,7 +7730,7 @@ class Interpreter {
         return match stmt {
             Expression(expr) => Value(
                 impl: ValueImpl::Enum(
-                    fields: [.reflect_expression(expr, span, scope, statement_enum_id, expression_enum_id)]
+                    fields: [as_unevaluated(fn[this, expr, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_expression(expr, span, scope, statement_enum_id, expression_enum_id))]
                     enum_id: statement_enum_id
                     constructor: statement_constructor("Expression")
                 )
@@ -7743,19 +7738,18 @@ class Interpreter {
             )
             Defer(statement) => Value(
                 impl: ValueImpl::Enum(
-                    fields: [.reflect_statement(stmt: statement, span, scope, statement_enum_id, expression_enum_id)]
+                    fields: [as_unevaluated(fn[this, statement, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_statement(stmt: statement, span, scope, statement_enum_id, expression_enum_id))]
                     enum_id: statement_enum_id
                     constructor: statement_constructor("Defer")
                 )
                 span
             )
             DestructuringAssignment(vars, var_decl) => {
-                mut fields: [Value] = []
+                mut fields: [LazyValue] = []
                 for var in vars {
-                    fields.push(.reflect_statement(stmt: var, span, scope, statement_enum_id, expression_enum_id))
+                    fields.push(as_unevaluated(fn[this, var, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_statement(stmt: var, span, scope, statement_enum_id, expression_enum_id)))
                 }
-                let var_decl_value = .reflect_statement(stmt: var_decl, span, scope, statement_enum_id, expression_enum_id)
-                fields.push(var_decl_value)
+                fields.push(as_unevaluated(fn[this, var_decl, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_statement(stmt: var_decl, span, scope, statement_enum_id, expression_enum_id)))
                 yield Value(
                     impl: ValueImpl::Enum(
                         fields: fields
@@ -7767,9 +7761,9 @@ class Interpreter {
             }
             VarDecl(var_id, init) => {
                 let var = .program.get_variable(var_id)
-                let name = .string_value(var.name, span)
-                let type = .reflect_type(type_id: var.type_id, span, scope)
-                let init_value = .reflect_expression(expr: init, span, scope, statement_enum_id, expression_enum_id)
+                let name = as_evaluated(.string_value(var.name, span))
+                let type = as_unevaluated(fn[this, var, span, scope]() throws -> Value => .reflect_type(type_id: var.type_id, span, scope))
+                let init_value = as_unevaluated(fn[this, init, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_expression(expr: init, span, scope, statement_enum_id, expression_enum_id))
                 yield Value(
                     impl: ValueImpl::Enum(
                         fields: [
@@ -7784,19 +7778,19 @@ class Interpreter {
                 )
             }
             If(condition, then_block, else_statement) => {
-                let condition_value = .reflect_expression(expr: condition, span, scope, statement_enum_id, expression_enum_id)
-                mut then_block_statements: [Value] = []
+                let condition_value = as_unevaluated(fn[this, condition, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_expression(expr: condition, span, scope, statement_enum_id, expression_enum_id))
+                mut then_block_statements: [LazyValue] = []
                 for stmt in then_block.statements {
-                    then_block_statements.push(.reflect_statement(stmt, span, scope, statement_enum_id, expression_enum_id))
+                    then_block_statements.push(as_unevaluated(fn[this, stmt, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_statement(stmt, span, scope, statement_enum_id, expression_enum_id)))
                 }
-                let then_block_value = Value(
+                let then_block_value = as_evaluated(Value(
                     impl: ValueImpl::JaktArray(
                         values: then_block_statements
                         type_id: .array_type_of_enum(statement_enum_id)
                     )
                     span
-                )
-                let else_value = match else_statement.has_value() {
+                ))
+                let else_value = as_evaluated(match else_statement.has_value() {
                     true => Value(
                         impl: ValueImpl::OptionalSome(
                             value: .reflect_statement(stmt: else_statement!, span, scope, statement_enum_id, expression_enum_id)
@@ -7807,7 +7801,7 @@ class Interpreter {
                         impl: ValueImpl::OptionalNone
                         span
                     )
-                }
+                })
 
                 yield Value(
                     impl: ValueImpl::Enum(
@@ -7823,9 +7817,9 @@ class Interpreter {
                 )
             }
             Block(block) => {
-                mut statements: [Value] = []
+                mut statements: [LazyValue] = []
                 for stmt in block.statements {
-                    statements.push(.reflect_statement(stmt, span, scope, statement_enum_id, expression_enum_id))
+                    statements.push(as_unevaluated(fn[this, stmt, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_statement(stmt, span, scope, statement_enum_id, expression_enum_id)))
                 }
                 yield Value(
                     impl: ValueImpl::JaktArray(
@@ -7836,9 +7830,9 @@ class Interpreter {
                 )
             }
             Loop(block) => {
-                mut statements: [Value] = []
+                mut statements: [LazyValue] = []
                 for stmt in block.statements {
-                    statements.push(.reflect_statement(stmt, span, scope, statement_enum_id, expression_enum_id))
+                    statements.push(as_unevaluated(fn[this, stmt, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_statement(stmt, span, scope, statement_enum_id, expression_enum_id)))
                 }
                 yield Value(
                     impl: ValueImpl::JaktArray(
@@ -7849,22 +7843,22 @@ class Interpreter {
                 )
             }
             While(condition, block) => {
-                let condition_value = .reflect_expression(expr: condition, span, scope, statement_enum_id, expression_enum_id)
-                mut statements: [Value] = []
+                let condition_value = as_unevaluated(fn[this, condition, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_expression(expr: condition, span, scope, statement_enum_id, expression_enum_id))
+                mut statements: [LazyValue] = []
                 for stmt in block.statements {
-                    statements.push(.reflect_statement(stmt, span, scope, statement_enum_id, expression_enum_id))
+                    statements.push(as_unevaluated(fn[this, stmt, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_statement(stmt, span, scope, statement_enum_id, expression_enum_id)))
                 }
                 yield Value(
                     impl: ValueImpl::Enum(
                         fields: [
                             condition_value
-                            Value(
+                            as_evaluated(Value(
                                 impl: ValueImpl::JaktArray(
                                     values: statements
                                     type_id: .array_type_of_enum(statement_enum_id)
                                 )
                                 span
-                            )
+                            ))
                         ]
                         enum_id: statement_enum_id
                         constructor: statement_constructor("While")
@@ -7873,7 +7867,7 @@ class Interpreter {
                 )
             }
             Return(val) => {
-                let value = match val.has_value() {
+                let value = as_evaluated(match val.has_value() {
                     true => Value(
                         impl: ValueImpl::OptionalSome(
                             value: .reflect_expression(expr: val!, span, scope, statement_enum_id, expression_enum_id)
@@ -7884,7 +7878,7 @@ class Interpreter {
                         impl: ValueImpl::OptionalNone
                         span
                     )
-                }
+                })
                 yield Value(
                     impl: ValueImpl::Enum(
                         fields: [value]
@@ -7911,7 +7905,7 @@ class Interpreter {
                 span
             )
             Throw(expr) => {
-                let value = .reflect_expression(expr, span, scope, statement_enum_id, expression_enum_id)
+                let value = as_unevaluated(fn[this, expr, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_expression(expr, span, scope, statement_enum_id, expression_enum_id))
                 yield Value(
                     impl: ValueImpl::Enum(
                         fields: [value]
@@ -7922,7 +7916,7 @@ class Interpreter {
                 )
             }
             Yield(expr) => {
-                let value = match expr.has_value() {
+                let value = as_evaluated(match expr.has_value() {
                     true => Value(
                         impl: ValueImpl::OptionalSome(
                             value: .reflect_expression(expr: expr!, span, scope, statement_enum_id, expression_enum_id)
@@ -7933,7 +7927,7 @@ class Interpreter {
                         impl: ValueImpl::OptionalNone
                         span
                     )
-                }
+                })
                 yield Value(
                     impl: ValueImpl::Enum(
                         fields: [value]
@@ -7944,20 +7938,20 @@ class Interpreter {
                 )
             }
             InlineCpp(lines) => {
-                mut lines_values: [Value] = []
+                mut lines_values: [LazyValue] = []
                 for line in lines {
-                    lines_values.push(.string_value(line, span))
+                    lines_values.push(as_evaluated(.string_value(line, span)))
                 }
                 yield Value(
                     impl: ValueImpl::Enum(
                         fields: [
-                            Value(
+                            as_evaluated(Value(
                                 impl: ValueImpl::JaktArray(
                                     values: lines_values
                                     type_id: .array_type_of_struct(.program.find_struct_in_prelude("String"))
                                 )
                                 span
-                            )
+                            ))
                         ]
                         enum_id: statement_enum_id
                         constructor: statement_constructor("InlineCpp")
@@ -7996,7 +7990,7 @@ class Interpreter {
             expression_enum_id
             &expression_constructor
             span
-        ](anon name: String, anon fields: [Value]) throws -> Value => Value(
+        ](anon name: String, anon fields: [LazyValue]) throws -> Value => Value(
             impl: ValueImpl::Enum(
                 fields
                 enum_id: expression_enum_id
@@ -8006,31 +8000,31 @@ class Interpreter {
         )
 
         return match expr {
-            Boolean(val) => make_value("Boolean", [.bool_value(val, span)])
+            Boolean(val) => make_value("Boolean", [as_evaluated(.bool_value(val, span))])
             NumericConstant => make_value("NumericConstant", []) // TODO
-            QuotedString(val) => make_value("QuotedString", [.string_value(val.to_string(), span)])
-            ByteConstant(val) => make_value("ByteConstant", [.string_value(val, span)])
+            QuotedString(val) => make_value("QuotedString", [as_evaluated(.string_value(val.to_string(), span))])
+            ByteConstant(val) => make_value("ByteConstant", [as_evaluated(.string_value(val, span))])
             CharacterConstant(val) => {
                 mut code_points = val.code_points()
                 let code_point = code_points.next()
                 if not code_point.has_value() {
                     throw Error::from_string_literal("Empty character constant")
                 }
-                yield make_value("CharacterConstant", [Value(
+                yield make_value("CharacterConstant", [as_evaluated(Value(
                     impl: ValueImpl::U32(code_point!)
                     span
-                )])
+                ))])
             }
-            CCharacterConstant(val) => make_value("CCharacterConstant", [Value(
+            CCharacterConstant(val) => make_value("CCharacterConstant", [as_evaluated(Value(
                 impl: ValueImpl::U8(val.byte_at(0))
                 span
-            )])
+            ))])
             UnaryOp => make_value("UnaryOp", []) // TODO
             BinaryOp => make_value("BinaryOp", []) // TODO
             JaktTuple(vals) => {
-                mut values: [Value] = []
+                mut values: [LazyValue] = []
                 for val in vals {
-                    values.push(.reflect_expression(expr: val, span, scope, statement_enum_id, expression_enum_id))
+                    values.push(as_unevaluated(fn[this, val, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_expression(expr: val, span, scope, statement_enum_id, expression_enum_id)))
                 }
                 yield make_value("TupleLiteral", values)
             }
@@ -8043,116 +8037,119 @@ class Interpreter {
                     true => ValueImpl::OptionalSome(value: .reflect_expression(expr: to!, span, scope, statement_enum_id, expression_enum_id))
                     false => ValueImpl::OptionalNone
                 }
-                yield make_value("Range", [
+                yield make_value("Range", as_evaluated([
                     Value(impl: from_value, span)
                     Value(impl: to_value, span)
-                ])
+                ]))
             }
             JaktArray(vals) => {
-                mut values: [Value] = []
+                mut values: [LazyValue] = []
                 for val in vals {
-                    values.push(.reflect_expression(expr: val, span, scope, statement_enum_id, expression_enum_id))
+                    values.push(as_unevaluated(fn[this, val, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_expression(expr: val, span, scope, statement_enum_id, expression_enum_id)))
                 }
                 yield make_value("ArrayLiteral", values)
             }
             JaktSet(vals) => {
-                mut values: [Value] = []
+                mut values: [LazyValue] = []
                 for val in vals {
-                    values.push(.reflect_expression(expr: val, span, scope, statement_enum_id, expression_enum_id))
+                    values.push(as_unevaluated(fn[this, val, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_expression(expr: val, span, scope, statement_enum_id, expression_enum_id)))
                 }
                 yield make_value("SetLiteral", values)
             }
             JaktDictionary(vals, key_type_id, value_type_id) => {
-                mut values: [Value] = []
+                mut values: [LazyValue] = []
                 for (key, val) in vals {
-                    values.push(Value(
+                    values.push(as_evaluated(Value(
                         impl: ValueImpl::JaktTuple(
                             fields: [
-                                .reflect_expression(expr: key, span, scope, statement_enum_id, expression_enum_id)
-                                .reflect_expression(expr: val, span, scope, statement_enum_id, expression_enum_id)
+                                as_unevaluated(fn[this, key, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_expression(expr: key, span, scope, statement_enum_id, expression_enum_id))
+                                as_unevaluated(fn[this, val, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_expression(expr: val, span, scope, statement_enum_id, expression_enum_id))
                             ]
                             type_id: .tuple_type(members: [key_type_id, value_type_id])
                         )
                         span
-                    ))
+                    )))
                 }
                 yield make_value("DictionaryLiteral", values)
             }
             IndexedExpression(expr, index) => {
-                let expr_value = .reflect_expression(expr, span, scope, statement_enum_id, expression_enum_id)
-                let index_value = .reflect_expression(expr: index, span, scope, statement_enum_id, expression_enum_id)
+                let expr_value = as_unevaluated(fn[this, expr, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_expression(expr, span, scope, statement_enum_id, expression_enum_id))
+                let index_value = as_unevaluated(fn[this, index, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_expression(expr: index, span, scope, statement_enum_id, expression_enum_id))
                 yield make_value("IndexedExpression", [expr_value, index_value])
             }
             IndexedDictionary(expr, index) => {
-                let expr_value = .reflect_expression(expr, span, scope, statement_enum_id, expression_enum_id)
-                let index_value = .reflect_expression(expr: index, span, scope, statement_enum_id, expression_enum_id)
+                let expr_value = as_unevaluated(fn[this, expr, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_expression(expr, span, scope, statement_enum_id, expression_enum_id))
+                let index_value = as_unevaluated(fn[this, index, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_expression(expr: index, span, scope, statement_enum_id, expression_enum_id))
                 yield make_value("IndexedDictionary", [expr_value, index_value])
             }
             IndexedTuple(expr, index, is_optional) => {
-                let expr_value = .reflect_expression(expr, span, scope, statement_enum_id, expression_enum_id)
-                let index_value = Value(
+                let expr_value = as_unevaluated(fn[this, expr, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_expression(expr, span, scope, statement_enum_id, expression_enum_id))
+                let index_value = as_evaluated(Value(
                     impl: ValueImpl::USize(index)
                     span
-                )
-                let is_optional_value = Value(
+                ))
+                let is_optional_value = as_evaluated(Value(
                     impl: ValueImpl::Bool(is_optional)
                     span
-                )
+                ))
                 yield make_value("IndexedTuple", [expr_value, index_value, is_optional_value])
             }
             IndexedStruct(expr, name, is_optional) => {
-                let expr_value = .reflect_expression(expr, span, scope, statement_enum_id, expression_enum_id)
-                let index_value = .string_value(name, span)
-                let is_optional_value = Value(
+                let expr_value = as_unevaluated(fn[this, expr, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_expression(expr, span, scope, statement_enum_id, expression_enum_id))
+                let index_value = as_evaluated(.string_value(name, span))
+                let is_optional_value = as_evaluated(Value(
                     impl: ValueImpl::Bool(is_optional)
                     span
-                )
+                ))
                 yield make_value("IndexedStruct", [expr_value, index_value, is_optional_value])
             }
             IndexedCommonEnumMember(expr, index, is_optional) => {
-                let expr_value = .reflect_expression(expr, span, scope, statement_enum_id, expression_enum_id)
-                let index_value = .string_value(index, span)
-                let is_optional_value = Value(
+                let expr_value = as_unevaluated(fn[this, expr, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_expression(expr, span, scope, statement_enum_id, expression_enum_id))
+                let index_value = as_evaluated(.string_value(index, span))
+                let is_optional_value = as_evaluated(Value(
                     impl: ValueImpl::Bool(is_optional)
                     span
-                )
+                ))
                 yield make_value("IndexedCommonEnumMember", [expr_value, index_value, is_optional_value])
             }
             ComptimeIndex(expr, index, is_optional) => {
-                let expr_value = .reflect_expression(expr, span, scope, statement_enum_id, expression_enum_id)
-                let index_value = .reflect_expression(expr: index, span, scope, statement_enum_id, expression_enum_id)
-                let is_optional_value = Value(
+                let expr_value = as_unevaluated(fn[this, expr, statement_enum_id, expression_enum_id, span, scope]() throws -> Value =>.reflect_expression(expr, span, scope, statement_enum_id, expression_enum_id))
+                let index_value = as_unevaluated(fn[this, index, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_expression(expr: index, span, scope, statement_enum_id, expression_enum_id))
+                let is_optional_value = as_evaluated(Value(
                     impl: ValueImpl::Bool(is_optional)
                     span
-                )
+                ))
                 yield make_value("ComptimeIndex", [expr_value, index_value, is_optional_value])
             }
             Match => make_value("Match", []) // TODO
             EnumVariantArg => make_value("EnumVariantArg", []) // TODO
-            Call(call) => make_value("Call", [.reflect_call(call, span, scope)])
+            Call(call) => make_value("Call", [as_unevaluated(fn[this, call, span, scope]() throws -> Value => .reflect_call(call, span, scope))])
             MethodCall(
                 expr
                 call
             ) => make_value(
                 "MethodCall"
-                [.reflect_expression(expr, span, scope, statement_enum_id, expression_enum_id), .reflect_call(call, span, scope)]
+                [
+                    as_unevaluated(fn[this, expr, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_expression(expr, span, scope, statement_enum_id, expression_enum_id)),
+                    as_unevaluated(fn[this, call, span, scope]() throws -> Value => .reflect_call(call, span, scope))
+                ]
             )
             NamespacedVar => make_value("NamespacedVar", []) // TODO
             Var => make_value("Var", []) // TODO
             OptionalNone => make_value("OptionalNone", [])
-            OptionalSome(expr) => make_value("OptionalSome", [.reflect_expression(expr: expr, span, scope, statement_enum_id, expression_enum_id)])
-            ForcedUnwrap(expr) => make_value("ForcedUnwrap", [.reflect_expression(expr: expr, span, scope, statement_enum_id, expression_enum_id)])
+            OptionalSome(expr) => make_value("OptionalSome", [as_unevaluated(fn[this, expr, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_expression(expr: expr, span, scope, statement_enum_id, expression_enum_id))])
+            ForcedUnwrap(expr) => make_value("ForcedUnwrap", [as_unevaluated(fn[this, expr, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_expression(expr: expr, span, scope, statement_enum_id, expression_enum_id))])
             Block(block) => {
-                mut statements: [Value] = []
+                mut statements: [LazyValue] = []
                 for stmt in block.statements {
-                    statements.push(.reflect_statement(stmt, span, scope, statement_enum_id, expression_enum_id))
+                    statements.push(as_unevaluated(fn[this, stmt, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_statement(stmt, span, scope, statement_enum_id, expression_enum_id)))
                 }
                 yield make_value("Block", [
-                    .array_value_of_type(
+                    as_evaluated(.array_value_of_type(
                         values: statements
                         type: .array_type_of_enum(expression_enum_id)
                         span
-                    )
+                    ))
                 ])
             }
             Function => make_value("Function", []) // TODO
@@ -8160,7 +8157,7 @@ class Interpreter {
             Must => make_value("Must", []) // TODO
             Try => make_value("Try", []) // TODO
             TryBlock => make_value("TryBlock", []) // TODO
-            Reflect(type_id) => make_value("Reflect", [.reflect_type(type_id, span, scope)])
+            Reflect(type_id) => make_value("Reflect", [as_unevaluated(fn[this, type_id, span, scope]() throws -> Value => .reflect_type(type_id, span, scope))])
             Garbage => {
                 throw Error::from_string_literal("Garbage expression in reflected object")
             }
@@ -8168,9 +8165,9 @@ class Interpreter {
     }
 
     public fn reflect_call(mut this, call: CheckedCall, span: Span, scope: InterpreterScope) throws -> Value {
-        mut namespaces: [Value] = []
+        mut namespaces: [LazyValue] = []
         for ns in call.namespace_ {
-            namespaces.push(.string_value(ns.name, span))
+            namespaces.push(as_evaluated(.string_value(ns.name, span)))
             // FIXME: Generic parameters.
         }
 
@@ -8188,17 +8185,17 @@ class Interpreter {
             }
         }
 
-        mut args: [Value] = []
+        mut args: [LazyValue] = []
         for arg in call.args {
-            args.push(.reflect_expression(expr: arg.1, span, scope, statement_enum_id, expression_enum_id))
+            args.push(as_unevaluated(fn[this, arg, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_expression(expr: arg.1, span, scope, statement_enum_id, expression_enum_id)))
         }
 
-        mut type_args: [Value] = []
+        mut type_args: [LazyValue] = []
         for type_arg in call.type_args {
-            type_args.push(.reflect_type(type_id: type_arg, span, scope))
+            type_args.push(as_unevaluated(fn[this, type_arg, span, scope]() throws -> Value => .reflect_type(type_id: type_arg, span, scope)))
         }
 
-        let return_type = .reflect_type(type_id: call.return_type, span, scope)
+        let return_type = as_unevaluated(fn[this, call, span, scope]() throws -> Value => .reflect_type(type_id: call.return_type, span, scope))
         // struct Call { namespaces, name, args, type_args, return_type }
         let call_struct_id = .program.find_struct_in_prelude("Call")
         let call_constructor = .program.find_function_in_scope(
@@ -8217,25 +8214,25 @@ class Interpreter {
             impl: ValueImpl::Struct(
                 fields: [
                     // namespaces:
-                    .array_value_of_type(
+                    as_evaluated(.array_value_of_type(
                         values: namespaces
                         type: .array_type_of_struct(.program.find_struct_in_prelude("String"))
                         span
-                    ),
+                    )),
                     // name:
-                    .string_value(call.name, span),
+                    as_evaluated(.string_value(call.name, span)),
                     // args:
-                    .array_value_of_type(
+                    as_evaluated(.array_value_of_type(
                         values: args
                         type: .array_type_of_enum(expression_enum_id)
                         span
-                    ),
+                    )),
                     // type_args:
-                    .array_value_of_type(
+                    as_evaluated(.array_value_of_type(
                         values: type_args
                         type: .array_type_of_enum(type_enum_id)
                         span
-                    ),
+                    )),
                     // return_type:
                     return_type
                 ]
@@ -8274,7 +8271,7 @@ class Interpreter {
         )
         .reflected_type_cache.set(mapped_type_id, result)
 
-        mut fields: [Value] = []
+        mut fields: [LazyValue] = []
         let found_constructor = match type {
             Void | I8 | I16 | I32 | I64 | U8 | U16 | U32 | U64 | Usize | F32 | F64 | JaktString | CChar | CInt | Bool | Unknown | Never => {
                 let constructor = .program.find_function_in_scope(
@@ -8312,7 +8309,7 @@ class Interpreter {
                     .compiler.panic("Invalid type")
                 }
 
-                fields = [.string_value(name, span)]
+                fields = [as_evaluated(.string_value(name, span))]
                 yield constructor!
             }
             RawPtr(type_id) | Reference(type_id) | MutableReference(type_id) => {
@@ -8320,7 +8317,7 @@ class Interpreter {
                     parent_scope_id: .program.get_enum(reflected_enum_id).scope_id
                     function_name: type.constructor_name())!
 
-                fields = [.reflect_type(type_id, span, scope)]
+                fields = [as_unevaluated(fn[this, type_id, span, scope]() throws -> Value => .reflect_type(type_id, span, scope))]
                 yield constructor
             }
             GenericInstance(id: struct_id) | Struct(struct_id) => {
@@ -8361,7 +8358,7 @@ class Interpreter {
                     values: match type {
                         GenericInstance(args) => {
                             mut i = 0uz
-                            mut result: [Value] = []
+                            mut result: [LazyValue] = []
                             for generic_parameter in subject_struct.generic_parameters {
                                 let name = match .program.get_type(generic_parameter.type_id) {
                                     TypeVariable(name) => name
@@ -8373,13 +8370,13 @@ class Interpreter {
                                     true => args[i]
                                     false => builtin(BuiltinType::Unknown)
                                 }
-                                result.push(.tuple_value(
+                                result.push(as_evaluated(.tuple_value(
                                     members: [
-                                        .string_value(name, span)
-                                        .reflect_type(type_id: t, span, scope)
+                                        as_evaluated(.string_value(name, span))
+                                        as_unevaluated(fn[this, t, span, scope]() throws -> Value => .reflect_type(type_id: t, span, scope))
                                     ]
                                     type: tuple_type
-                                    span))
+                                    span)))
                                 i += 1
                             }
                             yield result
@@ -8404,36 +8401,36 @@ class Interpreter {
                 }
 
                 fields = [
-                    Value(
+                    as_evaluated(Value(
                         impl: ValueImpl::Struct(
                             fields: [
                                 // name:
-                                .string_value(subject_struct.name, span)
-                                methods
-                                generic_parameters
+                                as_evaluated(.string_value(subject_struct.name, span))
+                                as_evaluated(methods)
+                                as_evaluated(generic_parameters)
                                 // record_type:
-                                Value(
+                                as_evaluated(Value(
                                     impl: ValueImpl::Enum(
                                         fields: [
-                                            Value(
+                                            as_evaluated(Value(
                                                 impl: ValueImpl::JaktArray(
-                                                    values: record_type_fields
+                                                    values: as_evaluated(record_type_fields)
                                                     type_id: .array_type_of_struct(field_struct_id)
                                                 )
                                                 span
-                                            )
+                                            ))
                                         ]
                                         enum_id: record_type_enum_id
                                         constructor: record_type_struct_constructor
                                     )
                                     span
-                                )
+                                ))
                             ]
                             struct_id: record_struct_id
                             constructor: record_struct_constructor
                         )
                         span
-                    )
+                    ))
                 ]
 
                 yield constructor!
@@ -8484,7 +8481,7 @@ class Interpreter {
                     values: match type {
                         GenericInstance(args) => {
                             mut i = 0uz
-                            mut result: [Value] = []
+                            mut result: [LazyValue] = []
                             for generic_parameter in subject_enum.generic_parameters {
                                 let name = match .program.get_type(generic_parameter.type_id) {
                                     TypeVariable(name) => name
@@ -8496,13 +8493,13 @@ class Interpreter {
                                     true => args[i]
                                     false => builtin(BuiltinType::Unknown)
                                 }
-                                result.push(.tuple_value(
+                                result.push(as_evaluated(.tuple_value(
                                     members: [
-                                        .string_value(name, span)
-                                        .reflect_type(type_id: t, span, scope)
+                                        as_evaluated(.string_value(name, span))
+                                        as_unevaluated(fn[this, t, span, scope]() throws -> Value => .reflect_type(type_id: t, span, scope))
                                     ]
                                     type: tuple_type
-                                    span))
+                                    span)))
                                 i += 1
                             }
                             yield result
@@ -8518,60 +8515,60 @@ class Interpreter {
                         panic("Expected Field to be a struct")
                     }
                 }
-                mut record_type_fields: [Value] = []
+                mut record_type_fields: [LazyValue] = []
                 if is_value_enum {
-                    let variants = .reflect_value_enum_variants(subject_enum, span, scope)
+                    let variants = as_evaluated(.reflect_value_enum_variants(subject_enum, span, scope))
                     record_type_fields = [
                         // underlying_type:
-                        .reflect_type(type_id: subject_enum.underlying_type_id, span, scope)
+                        as_unevaluated(fn[this, subject_enum, span, scope]() throws -> Value => .reflect_type(type_id: subject_enum.underlying_type_id, span, scope))
                         // variants:
-                        Value(
+                        as_evaluated(Value(
                             impl: ValueImpl::JaktArray(
                                 values: variants
                                 type_id: .array_type_of_struct(field_struct_id)
                             )
                             span
-                        )
+                        ))
                     ]
                 } else {
-                    let variants = .reflect_sum_enum_variants(subject_enum, span, scope)
+                    let variants = as_evaluated(.reflect_sum_enum_variants(subject_enum, span, scope))
                     record_type_fields = [
                         // is_boxed:
-                        .bool_value(subject_enum.is_boxed, span),
+                        as_evaluated(.bool_value(subject_enum.is_boxed, span)),
                         // variants:
-                        Value(
+                        as_evaluated(Value(
                             impl: ValueImpl::JaktArray(
                                 values: variants
                                 type_id: .array_type_of_struct(field_struct_id)
                             )
                             span
-                        )
+                        ))
                     ]
                 }
 
                 fields = [
-                    Value(
+                    as_evaluated(Value(
                         impl: ValueImpl::Struct(
                             fields: [
                                 // name:
-                                .string_value(subject_enum.name, span)
-                                methods
-                                generic_parameters
+                                as_evaluated(.string_value(subject_enum.name, span))
+                                as_evaluated(methods)
+                                as_evaluated(generic_parameters)
                                 // record_type:
-                                Value(
+                                as_evaluated(Value(
                                     impl: ValueImpl::Enum(
                                         fields: record_type_fields
                                         enum_id: record_type_enum_id
                                         constructor: record_type_struct_constructor
                                     )
                                     span
-                                )
+                                ))
                             ]
                             struct_id: record_struct_id
                             constructor: record_struct_constructor
                         )
                         span
-                    )
+                    ))
                 ]
 
                 yield constructor!

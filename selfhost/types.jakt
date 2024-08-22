@@ -3204,6 +3204,34 @@ class CheckedProgram {
     }
 }
 
+class UnevaluatedLazyValue {
+    public eval: fn() throws -> Value
+    public fn evalulate(this) throws -> Value {
+        let eval = &.eval
+        return eval()
+    }
+}
+
+boxed enum LazyValue {
+    Unevaluated(UnevaluatedLazyValue)
+    Evaluated(Value)
+
+    fn evaluated(mut this) throws -> Value => match this {
+        Evaluated(value) => value
+        Unevaluated(uneval) => {
+            let result = uneval.evalulate()
+            // Is this really okay?
+            this = LazyValue::Evaluated(result)
+            return result
+        }
+    }
+
+    fn copy(this) -> LazyValue => match this {
+        Evaluated(value) => LazyValue::Evaluated(value.copy())
+        Unevaluated(uneval) => LazyValue::Unevaluated(uneval)
+    }
+}
+
 boxed enum ValueImpl {
     Void
     Bool(bool)
@@ -3222,16 +3250,16 @@ boxed enum ValueImpl {
     StringView(String)
     CChar(c_char)
     CInt(c_int)
-    Struct(fields: [Value], struct_id: StructId, constructor: FunctionId?)
-    Class(fields: [Value], struct_id: StructId, constructor: FunctionId?)
-    Enum(fields: [Value], enum_id: EnumId, constructor: FunctionId)
-    JaktArray(values: [Value], type_id: TypeId)
-    JaktDictionary(keys: [Value], values: [Value], type_id: TypeId)
-    JaktSet(values: [Value], type_id: TypeId)
+    Struct(fields: [LazyValue], struct_id: StructId, constructor: FunctionId?)
+    Class(fields: [LazyValue], struct_id: StructId, constructor: FunctionId?)
+    Enum(fields: [LazyValue], enum_id: EnumId, constructor: FunctionId)
+    JaktArray(values: [LazyValue], type_id: TypeId)
+    JaktDictionary(keys: [LazyValue], values: [LazyValue], type_id: TypeId)
+    JaktSet(values: [LazyValue], type_id: TypeId)
     RawPtr(ValueImpl)
     OptionalSome(value: Value)
     OptionalNone
-    JaktTuple(fields: [Value], type_id: TypeId)
+    JaktTuple(fields: [LazyValue], type_id: TypeId)
     Function(
         captures: [String: Value]
         params: [String: (TypeId, (ParsedExpression, ScopeId)?)]
@@ -3289,40 +3317,40 @@ boxed enum ValueImpl {
         CChar(x) => ValueImpl::CChar(x)
         CInt(x) => ValueImpl::CInt(x)
         Struct(fields, struct_id, constructor) => {
-            mut fields_copy: [Value] = [];
+            mut fields_copy: [LazyValue] = []
             for field in fields {
-                fields_copy.push(field.copy());
+                fields_copy.push(field.copy())
             }
             yield ValueImpl::Struct(fields: fields_copy, struct_id, constructor)
         }
         Class(fields, struct_id, constructor) => ValueImpl::Class(fields, struct_id, constructor)
         Enum(fields, enum_id, constructor) => {
-            mut fields_copy: [Value] = [];
+            mut fields_copy: [LazyValue] = []
             for field in fields {
-                fields_copy.push(field.copy());
+                fields_copy.push(field.copy())
             }
             yield ValueImpl::Enum(fields: fields_copy, enum_id, constructor)
         }
         JaktArray(values, type_id) => {
-            mut values_copy: [Value] = [];
+            mut values_copy: [LazyValue] = []
             for value in values {
-                values_copy.push(value.copy());
+                values_copy.push(value.copy())
             }
             yield ValueImpl::JaktArray(values: values_copy, type_id)
         }
         JaktDictionary(keys, values, type_id) => {
-            mut values_copy: [Value] = []
+            mut values_copy: [LazyValue] = []
             for value in values {
                 values_copy.push(value.copy())
             }
-            mut keys_copy: [Value] = []
+            mut keys_copy: [LazyValue] = []
             for key in keys {
                 keys_copy.push(key.copy())
             }
             yield ValueImpl::JaktDictionary(keys: keys_copy, values: values_copy, type_id)
         }
         JaktSet(values, type_id) => {
-            mut values_copy: [Value] = []
+            mut values_copy: [LazyValue] = []
             for value in values {
                 values_copy.push(value.copy())
             }
@@ -3332,7 +3360,7 @@ boxed enum ValueImpl {
         OptionalSome(value) => ValueImpl::OptionalSome(value: value.copy())
         OptionalNone => ValueImpl::OptionalNone
         JaktTuple(fields, type_id) => {
-            mut values_copy: [Value] = [];
+            mut values_copy: [LazyValue] = [];
             for value in fields {
                 values_copy.push(value.copy());
             }
@@ -3516,8 +3544,8 @@ fn format_value_impl(anon format_string: String, anon value: Value, program: &Ch
 
     Void => runtime_format(format_string, "(void)")
 
-    Struct(fields, struct_id, constructor)
-    | Class(fields, struct_id, constructor)
+    Struct(&mut fields, struct_id, constructor)
+    | Class(&mut fields, struct_id, constructor)
     => {
         let structure = program.get_struct(struct_id)
         mut builder = StringBuilder::create()
@@ -3545,7 +3573,7 @@ fn format_value_impl(anon format_string: String, anon value: Value, program: &Ch
 
             builder.append(field_names[index])
             builder.append(": ")
-            builder.append(format_value_impl(format_string, field, program))
+            builder.append(format_value_impl(format_string, field.evaluated(), program))
             index += 1
         }
 
@@ -3553,7 +3581,7 @@ fn format_value_impl(anon format_string: String, anon value: Value, program: &Ch
         yield builder.to_string()
     }
 
-    Enum(fields, enum_id, constructor) => {
+    Enum(&mut fields, enum_id, constructor) => {
         let enum_ = program.get_enum(enum_id)
         let function = program.get_function(constructor)
         mut builder = StringBuilder::create()
@@ -3575,7 +3603,7 @@ fn format_value_impl(anon format_string: String, anon value: Value, program: &Ch
 
             builder.append(field_names[index])
             builder.append(": ")
-            builder.append(format_value_impl(format_string, field, program))
+            builder.append(format_value_impl(format_string, field.evaluated(), program))
             index += 1
         }
 
@@ -3590,9 +3618,9 @@ fn format_value_impl(anon format_string: String, anon value: Value, program: &Ch
     )
     OptionalNone => runtime_format(format_string, "None")
 
-    JaktTuple(fields)
-    | JaktArray(values: fields)
-    | JaktSet(values: fields) => {
+    JaktTuple(&mut fields)
+    | JaktArray(&mut values: fields)
+    | JaktSet(&mut values: fields) => {
         mut builder = StringBuilder::create()
         let surrounding = match value.impl {
             JaktTuple => ('(', ')')
@@ -3609,7 +3637,7 @@ fn format_value_impl(anon format_string: String, anon value: Value, program: &Ch
                 builder.append(", ")
             }
 
-            builder.append(format_value_impl(format_string, field, program))
+            builder.append(format_value_impl(format_string, field.evaluated(), program))
             index += 1
         }
 
@@ -3617,7 +3645,7 @@ fn format_value_impl(anon format_string: String, anon value: Value, program: &Ch
         yield builder.to_string()
     }
 
-    JaktDictionary(keys, values) => {
+    JaktDictionary(&mut keys, &mut values) => {
         mut builder = StringBuilder::create()
         builder.append('[')
         mut index = 0uz
@@ -3626,9 +3654,9 @@ fn format_value_impl(anon format_string: String, anon value: Value, program: &Ch
                 builder.append(", ")
             }
 
-            builder.append(format_value_impl(format_string, key, program))
+            builder.append(format_value_impl(format_string, key.evaluated(), program))
             builder.append(": ")
-            builder.append(format_value_impl(format_string, values[index], program))
+            builder.append(format_value_impl(format_string, values[index].evaluated(), program))
 
             index += 1
         }

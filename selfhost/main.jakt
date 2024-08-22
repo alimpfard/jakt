@@ -18,7 +18,7 @@ import codegen { CodeGenerator }
 import error { JaktError, print_error }
 import formatter { Formatter }
 import ide
-import interpreter { Interpreter, InterpreterScope, value_to_checked_expression }
+import interpreter { Interpreter, InterpreterScope, value_to_checked_expression, as_evaluated }
 import lexer { Lexer, Token }
 import parser { Parser }
 import platform { library_name_for_target, platform_compiler }
@@ -771,7 +771,7 @@ fn compiler_main(anon args: [String]) throws -> c_int {
                     passed_arguments.push(Value(impl: ValueImpl::JaktString(argument), span: call_span))
                 }
                 yield [Value(
-                    impl: ValueImpl::JaktArray(values: passed_arguments, type_id: first_main_param!.variable.type_id)
+                    impl: ValueImpl::JaktArray(values: as_evaluated(passed_arguments), type_id: first_main_param!.variable.type_id)
                     span: call_span
                 )]
             }
