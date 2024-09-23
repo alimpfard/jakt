@@ -7965,6 +7965,154 @@ class Interpreter {
         }
     }
 
+    fn reflect_numeric_constant(
+        mut this
+        anon value: CheckedNumericConstant
+        anon span: Span
+        anon scope: InterpreterScope
+    ) throws -> Value {
+        let numeric_constant_enum_id = match .program.find_reflected_primitive("NumericConstant") {
+            Enum(id) => id
+            else => {
+                panic("Expected NumericConstant to be an enum")
+            }
+        }
+        let make_value = fn[this, numeric_constant_enum_id, span](anon name: String, anon fields: [LazyValue]) throws -> Value {
+            let constructor = .program.find_function_in_scope(
+                parent_scope_id: .program.get_enum(numeric_constant_enum_id).scope_id
+                function_name: name
+            )!
+
+            return Value(
+                impl: ValueImpl::Enum(
+                    fields: fields
+                    enum_id: numeric_constant_enum_id
+                    constructor: constructor
+                )
+                span
+            )
+        }
+
+        return match value {
+            U8(v) => make_value("U8", [as_evaluated(Value(impl: ValueImpl::U8(v), span))])
+            U16(v) => make_value("U16", [as_evaluated(Value(impl: ValueImpl::U16(v), span))])
+            U32(v) => make_value("U32", [as_evaluated(Value(impl: ValueImpl::U32(v), span))])
+            U64(v) => make_value("U64", [as_evaluated(Value(impl: ValueImpl::U64(v), span))])
+            I8(v) => make_value("U128", [as_evaluated(Value(impl: ValueImpl::I8(v), span))])
+            I16(v) => make_value("I16", [as_evaluated(Value(impl: ValueImpl::I16(v), span))])
+            I32(v) => make_value("I32", [as_evaluated(Value(impl: ValueImpl::I32(v), span))])
+            I64(v) => make_value("I64", [as_evaluated(Value(impl: ValueImpl::I64(v), span))])
+            USize(v) => make_value("USize", [as_evaluated(Value(impl: ValueImpl::USize(v as! usize), span))])
+            F32(v) => make_value("F32", [as_evaluated(Value(impl: ValueImpl::F32(v), span))])
+            F64(v) => make_value("F64", [as_evaluated(Value(impl: ValueImpl::F64(v), span))])
+        }
+    }
+
+    fn reflect_unary_op(
+        mut this
+        anon expr: CheckedExpression
+        anon op: CheckedUnaryOperator
+        anon span: Span
+        anon scope: InterpreterScope
+        anon statement_enum_id: EnumId
+        anon expression_enum_id: EnumId
+    ) throws -> Value {
+        let unary_op_enum_id = match .program.find_reflected_primitive("UnaryOperator") {
+            Enum(id) => id
+            else => {
+                panic("Expected UnaryOp to be an enum")
+            }
+        }
+        let make_op = fn[this, unary_op_enum_id, span](anon name: String, anon fields: [LazyValue]) throws -> Value {
+            let constructor = .program.find_function_in_scope(
+                parent_scope_id: .program.get_enum(unary_op_enum_id).scope_id
+                function_name: name
+            )!
+
+            return Value(
+                impl: ValueImpl::Enum(
+                    fields: fields
+                    enum_id: unary_op_enum_id
+                    constructor: constructor
+                )
+                span
+            )
+        }
+
+        let expr_value = as_unevaluated(fn[this, expr, span, scope, statement_enum_id, expression_enum_id]() throws -> Value => .reflect_expression(expr, span, scope, statement_enum_id, expression_enum_id))
+        let op_value = match op {
+        PreIncrement => make_op("PreIncrement", [])
+        PostIncrement => make_op("PostIncrement", [])
+        PreDecrement => make_op("PreDecrement", [])
+        PostDecrement => make_op("PostDecrement", [])
+        Negate => make_op("Negate", [])
+        Dereference => make_op("Dereference", [])
+        RawAddress => make_op("RawAddress", [])
+        Reference => make_op("Reference", [])
+        MutableReference => make_op("MutableReference", [])
+        LogicalNot => make_op("LogicalNot", [])
+        BitwiseNot => make_op("BitwiseNot", [])
+        IsSome => make_op("IsSome", [])
+        IsNone => make_op("IsNone", [])
+        TypeCast(cast) => match cast {
+            Fallible(type) => make_op("TypeCast", [as_unevaluated(fn[this, type, span, scope]() throws -> Value => .reflect_type_cast_op("Fallible", type, span, scope))])
+            Infallible(type) => make_op("TypeCast", [as_unevaluated(fn[this, type, span, scope]() throws -> Value => .reflect_type_cast_op("Infallible", type, span, scope))])
+            Identity(type) => make_op("TypeCast", [as_unevaluated(fn[this, type, span, scope]() throws -> Value => .reflect_type_cast_op("Identity", type, span, scope))])
+        }
+        Is(type) => make_op("Is", [as_unevaluated(fn[this, type, span, scope]() throws -> Value => .reflect_type(type_id: type, span, scope))])
+        IsEnumVariant(
+            enum_variant
+            bindings
+            type_id
+        ) => make_op("IsEnumVariant", []) // TODO.
+        Sizeof(type) => make_op("Sizeof", [as_unevaluated(fn[this, type, span, scope]() throws -> Value => .reflect_type(type_id: type, span, scope))])
+        }
+    
+        return Value(
+            impl: ValueImpl::Enum(
+                fields: [expr_value, as_evaluated(op_value)]
+                enum_id: expression_enum_id
+                constructor: .program.find_function_in_scope(
+                    parent_scope_id: .program.get_enum(expression_enum_id).scope_id
+                    function_name: "UnaryOp"
+                )!
+            )
+            span
+        )
+    }
+
+    fn reflect_type_cast_op(
+        mut this
+        anon name: String
+        anon type: TypeId
+        anon span: Span
+        anon scope: InterpreterScope
+    ) throws -> Value {
+        let type_cast_enum_id = match .program.find_reflected_primitive("Typecast") {
+            Enum(id) => id
+            else => {
+                panic("Expected Typecast to be an enum")
+            }
+        }
+        let make_op = fn[this, type_cast_enum_id, span](anon name: String, anon fields: [LazyValue]) throws -> Value {
+            let constructor = .program.find_function_in_scope(
+                parent_scope_id: .program.get_enum(type_cast_enum_id).scope_id
+                function_name: name
+            )!
+
+            return Value(
+                impl: ValueImpl::Enum(
+                    fields: fields
+                    enum_id: type_cast_enum_id
+                    constructor: constructor
+                )
+                span
+            )
+        }
+
+        return make_op(name, [as_unevaluated(fn[this, type, span, scope]() throws -> Value => .reflect_type(type_id: type, span, scope))])
+    }
+
     public fn reflect_expression(
         mut this
         expr: CheckedExpression
@@ -8001,7 +8149,7 @@ class Interpreter {
 
         return match expr {
             Boolean(val) => make_value("Boolean", [as_evaluated(.bool_value(val, span))])
-            NumericConstant => make_value("NumericConstant", []) // TODO
+            NumericConstant(val) => make_value("NumericConstant", [as_unevaluated(fn[this, val, span, scope]() throws -> Value => .reflect_numeric_constant(val, span, scope))])
             QuotedString(val) => make_value("QuotedString", [as_evaluated(.string_value(val.to_string(), span))])
             ByteConstant(val) => make_value("ByteConstant", [as_evaluated(.string_value(val, span))])
             CharacterConstant(val) => {
@@ -8019,7 +8167,7 @@ class Interpreter {
                 impl: ValueImpl::U8(val.byte_at(0))
                 span
             ))])
-            UnaryOp => make_value("UnaryOp", []) // TODO
+            UnaryOp(expr, op) => make_value("UnaryOp", [as_unevaluated(fn[this, expr, op, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_unary_op(expr, op, span, scope, statement_enum_id, expression_enum_id))])
             BinaryOp => make_value("BinaryOp", []) // TODO
             JaktTuple(vals) => {
                 mut values: [LazyValue] = []
@@ -8134,8 +8282,23 @@ class Interpreter {
                     as_unevaluated(fn[this, call, span, scope]() throws -> Value => .reflect_call(call, span, scope))
                 ]
             )
-            NamespacedVar => make_value("NamespacedVar", []) // TODO
-            Var => make_value("Var", []) // TODO
+            NamespacedVar(var, namespaces) => {
+                mut namespaces_values: [LazyValue] = []
+                for ns in namespaces {
+                    let value = .string_value(ns.name, span)
+                    namespaces_values.push(as_evaluated(value))
+                }
+
+                yield make_value("NamespacedVar", [
+                    as_evaluated(.string_value(var.name, span)),
+                    as_evaluated(.array_value_of_type(
+                        values: namespaces_values
+                        type: .array_type_of_struct(.program.find_struct_in_prelude("String"))
+                        span
+                    ))
+                ])
+            }
+            Var(var) => make_value("Var", [as_evaluated(.string_value(var.name, span))])
             OptionalNone => make_value("OptionalNone", [])
             OptionalSome(expr) => make_value("OptionalSome", [as_unevaluated(fn[this, expr, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_expression(expr: expr, span, scope, statement_enum_id, expression_enum_id))])
             ForcedUnwrap(expr) => make_value("ForcedUnwrap", [as_unevaluated(fn[this, expr, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_expression(expr: expr, span, scope, statement_enum_id, expression_enum_id))])
@@ -8296,7 +8459,7 @@ class Interpreter {
                     .compiler.panic("Invalid type")
                 }
 
-                fields = [.string_value("anon$trait_impl", span)]
+                fields = [as_evaluated(.string_value("anon$trait_impl", span))]
                 yield constructor!
             }
             TypeVariable(name) => {

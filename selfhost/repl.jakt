@@ -6,11 +6,11 @@ import parser {
     ParsedModuleImport
 }
 import compiler { Compiler, FileId }
+import types { format_value_impl }
 import lexer { Lexer, Token }
 import parser { Parser }
 import utility { Span, allocate, null }
 import error { JaktError }
-import interpreter { value_to_checked_expression }
 import jakt::path { Path }
 
 import platform { repl_backend }
@@ -516,8 +516,8 @@ struct REPL {
             }
 
             let output = match result {
-                Return(value) | JustValue(value) => serialize_ast_node(value_to_checked_expression(value, interpreter)),
-                Throw(value) => "throw " + serialize_ast_node(value_to_checked_expression(value, interpreter))
+                Return(value) | JustValue(value) => format_value_impl("{}", value, program: &.typechecker.program)
+                Throw(value) => "throw " + format_value_impl("{}", value, program: &.typechecker.program)
                 Break | Continue | Yield => {
                     continue
                 }

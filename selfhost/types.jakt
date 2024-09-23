@@ -3523,6 +3523,14 @@ class TypecheckFunctions {
     ) throws -> FunctionId
 }
 
+fn format_value_if_evaluated(anon format_string: String, anon value: LazyValue, program: &CheckedProgram) throws -> String {
+    if value is Evaluated(v) {
+        return format_value_impl(format_string, v, program)
+    } else {
+        return "<unevaluated>"
+    }
+}
+
 fn format_value_impl(anon format_string: String, anon value: Value, program: &CheckedProgram) throws -> String => match value.impl {
     Bool(v)
     | U8(v)
@@ -3573,7 +3581,7 @@ fn format_value_impl(anon format_string: String, anon value: Value, program: &Ch
 
             builder.append(field_names[index])
             builder.append(": ")
-            builder.append(format_value_impl(format_string, field.evaluated(), program))
+            builder.append(format_value_if_evaluated(format_string, field, program))
             index += 1
         }
 
@@ -3603,7 +3611,7 @@ fn format_value_impl(anon format_string: String, anon value: Value, program: &Ch
 
             builder.append(field_names[index])
             builder.append(": ")
-            builder.append(format_value_impl(format_string, field.evaluated(), program))
+            builder.append(format_value_if_evaluated(format_string, field, program))
             index += 1
         }
 
@@ -3637,7 +3645,7 @@ fn format_value_impl(anon format_string: String, anon value: Value, program: &Ch
                 builder.append(", ")
             }
 
-            builder.append(format_value_impl(format_string, field.evaluated(), program))
+            builder.append(format_value_if_evaluated(format_string, field, program))
             index += 1
         }
 
@@ -3654,9 +3662,9 @@ fn format_value_impl(anon format_string: String, anon value: Value, program: &Ch
                 builder.append(", ")
             }
 
-            builder.append(format_value_impl(format_string, key.evaluated(), program))
+            builder.append(format_value_if_evaluated(format_string, key, program))
             builder.append(": ")
-            builder.append(format_value_impl(format_string, values[index].evaluated(), program))
+            builder.append(format_value_if_evaluated(format_string, values[index], program))
 
             index += 1
         }

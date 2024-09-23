@@ -128,7 +128,7 @@ function(add_jakt_executable executable)
   add_custom_command(
     OUTPUT ${cpp_files}
     COMMAND "${JAKT_EXECUTABLE_COMPILER_PATH}"
-      -S
+      -S -d
       $<$<CONFIG:Release>:-O>
       -T "${JAKT_EXECUTABLE_TARGET}"
       --binary-dir "${binary_tmp_dir}"

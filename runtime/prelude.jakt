@@ -245,20 +245,110 @@ namespace Reflect {
         Yield(Reflect::Expression?)
         InlineCpp([String])
     }
+    enum NumericConstant {
+        I8(i8)
+        I16(i16)
+        I32(i32)
+        I64(i64)
+        U8(u8)
+        U16(u16)
+        U32(u32)
+        U64(u64)
+        USize(usize)
+        F32(f32)
+        F64(f64)
+    }
+    boxed enum Typecast {
+        type: Reflect::Type
+
+        Fallible
+        Infallible
+        Identity
+    }
+    struct EnumVariantBindings {
+        name: Optional<String>
+        binding: String
+        type: Reflect::Type
+    }
+    boxed enum UnaryOperator {
+        PreIncrement
+        PostIncrement
+        PreDecrement
+        PostDecrement
+        Negate
+        Dereference
+        RawAddress
+        Reference
+        MutableReference
+        LogicalNot
+        BitwiseNot
+        IsSome
+        IsNone
+        TypeCast(Typecast)
+        Is(Type)
+        IsEnumVariant(
+            enum_variant: SumEnumVariant
+            bindings: [EnumVariantBindings]
+            type: Type
+        )
+    }
+    enum BinaryOperator {
+        Add
+        Subtract
+        Multiply
+        Divide
+        Modulo
+        LessThan
+        LessThanOrEqual
+        GreaterThan
+        GreaterThanOrEqual
+        Equal
+        NotEqual
+
+        BitwiseAnd
+        BitwiseXor
+        BitwiseOr
+        BitwiseLeftShift
+        BitwiseRightShift
+        ArithmeticLeftShift
+        ArithmeticRightShift
+
+        LogicalAnd
+        LogicalOr
+
+        NoneCoalescing
+
+        Assign
+        BitwiseAndAssign
+        BitwiseOrAssign
+        BitwiseXorAssign
+        BitwiseLeftShiftAssign
+        BitwiseRightShiftAssign
+        AddAssign
+        SubtractAssign
+        MultiplyAssign
+        ModuloAssign
+        DivideAssign
+        NoneCoalescingAssign
+
+        Garbage
+    }
     boxed enum Expression {
         Boolean(bool)
-        NumericConstant(
-            // TODO
-        )
+        NumericConstant(NumericConstant)
         QuotedString(String)
         ByteConstant(u8)
         CharacterConstant(u32)
         CCharacterConstant(c_char)
         UnaryOp(
-            // TODO
+            expr: Reflect::Expression,
+            op: Reflect::UnaryOperator
+            type: Reflect::Type
         )
         BinaryOp(
-            // TODO
+            lhs: Reflect::Expression,
+            rhs: Reflect::Expression,
+            op: Reflect::BinaryOperator
         )
         TupleLiteral([Reflect::Expression])
         RangeLiteral(from: Reflect::Expression?, to: Reflect::Expression?)
@@ -280,10 +370,11 @@ namespace Reflect {
         Call(Reflect::Call)
         MethodCall(this_expr: Reflect::Expression, call: Reflect::Call, is_optional: bool)
         NamespacedVar(
-            // TODO
+            name: String
+            namespace_: [String]
         )
         Var(
-            // TODO
+            name: String
         )
         OptionalNone
         OptionalSome(Reflect::Expression)
@@ -296,13 +387,17 @@ namespace Reflect {
             // TODO
         )
         Must(
-            // TODO
+            expr: Reflect::Expression
         )
         Try(
-            // TODO
+            expr: Reflect::Expression
+            catch_block: [Reflect::Statement]
+            catch_name: String?
         )
         TryBlock(
-            // TODO
+            statement: Reflect::Statement
+            error_name: String
+            catch_block: [Reflect::Statement]
         )
         Reflect(type: Reflect::Type)
     }
