@@ -1,11 +1,11 @@
 import types {
-    BinaryOperator, BlockControlFlow, BuiltinType, CheckedBlock, CheckedCall, CheckedEnum, CheckedEnumVariant
-    CheckedExpression, CheckedField, CheckedFunction, CheckedMatchBody, CheckedNumericConstant, CheckedParameter
-    CheckedProgram, CheckedStatement, CheckedStringLiteral, CheckedTypeCast, CheckedUnaryOperator, CheckedVariable
-    CheckedVisibility, EnumId, EnumVariantPatternArgument, FunctionGenerics, FunctionId, GenericInferences
-    LazyValue, ModuleId, NumericOrStringValue, ParsedStatement, ResolvedNamespace, SafetyMode, Scope, ScopeId, Span
-    StringLiteral, StructId, Type, TypeId, TypecheckFunctions, UnevaluatedLazyValue, Value, ValueImpl, VarId
-    builtin, comptime_format_impl, unknown_type_id, void_type_id
+    BinaryOperator, BlockControlFlow, BuiltinType, CheckedBinaryOperator, CheckedBlock, CheckedCall, CheckedEnum
+    CheckedEnumVariant, CheckedExpression, CheckedField, CheckedFunction, CheckedMatchBody, CheckedNumericConstant
+    CheckedParameter, CheckedProgram, CheckedStatement, CheckedStringLiteral, CheckedTypeCast, CheckedUnaryOperator
+    CheckedVariable, CheckedVisibility, EnumId, EnumVariantPatternArgument, FunctionGenerics, FunctionId
+    GenericInferences, LazyValue, ModuleId, NumericOrStringValue, ParsedStatement, ResolvedNamespace, SafetyMode
+    Scope, ScopeId, Span, StringLiteral, StructId, Type, TypeId, TypecheckFunctions, UnevaluatedLazyValue, Value
+    ValueImpl, VarId, builtin, comptime_format_impl, unknown_type_id, void_type_id
 }
 import parser { FunctionLinkage, FunctionType, ParsedBlock, ParsedExpression }
 import utility { escape_for_quotes, interpret_escapes, panic }
@@ -773,6 +773,7 @@ fn value_to_checked_expression(anon this_value: Value, anon mut interpreter: Int
             scope_id
         )
     }
+    UnevaluatedExpression(expr) => expr
     else => {
         interpreter.error(
             format("Cannot materialise the type {}", this_value.impl)
@@ -1018,6 +1019,62 @@ class Interpreter {
 
     private fn typecheck_block(mut this, block: ParsedBlock, scope: ScopeId, function_id: FunctionId?) throws -> CheckedBlock {
         return invoke_typecheck_block(&.typecheck_functions.block, block, scope, function_id)
+    }
+
+    private fn typecheck_unary_operation(
+        mut this
+        expr: CheckedExpression
+        op: CheckedUnaryOperator
+        span: Span
+        scope: ScopeId
+        safety_mode: SafetyMode
+    ) throws -> CheckedExpression {
+        return invoke_typecheck_unary_operation(&.typecheck_functions.unary_operation, expr, op, span, scope, safety_mode)
+    }
+
+    private fn typecheck_binary_operation(
+        mut this
+        lhs: CheckedExpression
+        rhs: CheckedExpression
+        op: BinaryOperator
+        span: Span
+        scope: ScopeId
+    ) throws -> CheckedExpression {
+        return invoke_typecheck_binary_operation(&.typecheck_functions.binary_operation, lhs, rhs, op, span, scope)
+    }
+
+    private fn invoke_typecheck_unary_operation(
+        anon function: &fn(
+            expr: CheckedExpression
+            op: CheckedUnaryOperator
+            span: Span
+            scope: ScopeId
+            safety_mode: SafetyMode
+        ) throws -> CheckedExpression
+        anon expr: CheckedExpression
+        anon op: CheckedUnaryOperator
+        anon span: Span
+        anon scope: ScopeId
+        anon safety_mode: SafetyMode
+    ) throws -> CheckedExpression {
+        return function(expr, op, span, scope_id: scope, safety_mode)
+    }
+
+    private fn invoke_typecheck_binary_operation(
+        anon function: &fn(
+            lhs: CheckedExpression
+            rhs: CheckedExpression
+            op: BinaryOperator
+            span: Span
+            scope_id: ScopeId
+        ) throws -> CheckedExpression
+        anon lhs: CheckedExpression
+        anon rhs: CheckedExpression
+        anon op: BinaryOperator
+        anon span: Span
+        anon scope: ScopeId
+    ) throws -> CheckedExpression {
+        return function(lhs, rhs, op, span, scope_id: scope)
     }
 
     private fn invoke_typecheck_block(
@@ -3306,10 +3363,406 @@ class Interpreter {
         }
     }
 
+    fn reify_type(mut this, anon ty: Value) throws -> TypeId => match ty.impl {
+        Enum(mut fields, enum_id, constructor) => {
+            let id = .program.find_reflected_primitive("Type")
+            guard id is Enum(eid) and eid.equals(enum_id) else {
+                .error(format("Invalid type passed to reify_type(): {}", .program.type_name(type_id: .program.get_enum(enum_id).type_id)), ty.span)
+                throw Error::from_string_literal("Invalid type")
+            }
+
+            return match .program.get_function(constructor).name {
+                "I8" => builtin(BuiltinType::I8)
+                "I16" => builtin(BuiltinType::I16)
+                "I32" => builtin(BuiltinType::I32)
+                "I64" => builtin(BuiltinType::I64)
+                "U8" => builtin(BuiltinType::U8)
+                "U16" => builtin(BuiltinType::U16)
+                "U32" => builtin(BuiltinType::U32)
+                "U64" => builtin(BuiltinType::U64)
+                "F32" => builtin(BuiltinType::F32)
+                "F64" => builtin(BuiltinType::F64)
+                "USize" => builtin(BuiltinType::Usize)
+                "Bool" => builtin(BuiltinType::Bool)
+                "String" => builtin(BuiltinType::JaktString)
+                "Array" => {
+                    let element_type = .reify_type(fields[0].evaluated())
+                    let id = .program.find_struct_in_prelude("Array")
+                    yield .find_or_add_type_id(Type::GenericInstance(id, args: [element_type]))
+                }
+                "Set" => {
+                    let element_type = .reify_type(fields[0].evaluated())
+                    let id = .program.find_struct_in_prelude("Set")
+                    yield .find_or_add_type_id(Type::GenericInstance(id, args: [element_type]))
+                }
+                "Dictionary" => {
+                    let key_type = .reify_type(fields[0].evaluated())
+                    let value_type = .reify_type(fields[1].evaluated())
+                    let id = .program.find_struct_in_prelude("Dictionary")
+                    yield .find_or_add_type_id(Type::GenericInstance(id, args: [key_type, value_type]))
+                }
+                "Optional" => {
+                    let element_type = .reify_type(fields[0].evaluated())
+                    let id = .program.find_struct_in_prelude("Optional")
+                    yield .find_or_add_type_id(Type::GenericInstance(id, args: [element_type]))
+                }
+                "Tuple" => {
+                    mut types: [TypeId] = []
+                    for field in fields {
+                        types.push(.reify_type(field.evaluated()))
+                    }
+                    let id = .program.find_struct_in_prelude("Tuple")
+                    yield .find_or_add_type_id(Type::GenericInstance(id, args: types))
+                }
+                else => {
+                    .error("Invalid type passed to reify_type()", ty.span)
+                    throw Error::from_string_literal("Invalid type")
+                }
+            }
+        }
+        else => {
+            .error("Invalid type passed to reify_type()", ty.span)
+            throw Error::from_string_literal("Invalid type")
+        }
+    }
+
+    fn reify(mut this, anon expr: Value, anon scope: ScopeId) throws -> CheckedExpression {
+        return match expr.impl {
+            UnevaluatedExpression(expr, type_id) => {
+                let inferred_type = expr.type()
+                if inferred_type != type_id {
+                    .error(
+                        format(
+                            "Expected type {}, found {}"
+                            .program.type_name(type_id: type_id)
+                            .program.type_name(type_id: inferred_type)
+                        )
+                        span: expr.span()
+                    )
+                    throw Error::from_string_literal("Invalid type")
+                }
+                yield expr
+            }
+            Enum(mut fields, enum_id, constructor) => {
+                let id = .program.find_reflected_primitive("Expression")
+                guard id is Enum(eid) and eid.equals(enum_id) else {
+                    .error(format("Invalid type passed to reify(): {}", .program.type_name(type_id: .program.get_enum(enum_id).type_id)), expr.span)
+                    throw Error::from_string_literal("Invalid type")
+                }
+
+                return match .program.get_function(constructor).name {
+                    "Boolean" => match fields[0].evaluated().impl {
+                        Bool(x) => CheckedExpression::Boolean(val: x, span: expr.span)
+                        else => {
+                            .error("Invalid type passed to reify()", expr.span)
+                            throw Error::from_string_literal("Invalid type")
+                        }
+                    }
+                    "NumericConstant" => match fields[0].evaluated().impl {
+                        Enum(mut fields, enum_id, constructor) => {
+                            let id = .program.find_reflected_primitive("NumericConstant")
+                            guard id is Enum(eid) and eid.equals(enum_id) else {
+                                .error(format("Invalid type passed to reify(): {}", .program.type_name(type_id: .program.get_enum(enum_id).type_id)), expr.span)
+                                throw Error::from_string_literal("Invalid type")
+                            }
+
+                            let (constant, type) = match .program.get_function(constructor).name {
+                                "I8" => match fields[0].evaluated().impl {
+                                    I8(x) => (CheckedNumericConstant::I8(x), builtin(BuiltinType::I8))
+                                    else => {
+                                        .error("Invalid type passed to reify()", expr.span)
+                                        throw Error::from_string_literal("Invalid type")
+                                    }
+                                }
+                                "I16" => match fields[0].evaluated().impl {
+                                    I16(x) => (CheckedNumericConstant::I16(x), builtin(BuiltinType::I16))
+                                    else => {
+                                        .error("Invalid type passed to reify()", expr.span)
+                                        throw Error::from_string_literal("Invalid type")
+                                    }
+                                }
+                                "I32" => match fields[0].evaluated().impl {
+                                    I32(x) => (CheckedNumericConstant::I32(x), builtin(BuiltinType::I32))
+                                    else => {
+                                        .error("Invalid type passed to reify()", expr.span)
+                                        throw Error::from_string_literal("Invalid type")
+                                    }
+                                }
+                                "I64" => match fields[0].evaluated().impl {
+                                    I64(x) => (CheckedNumericConstant::I64(x), builtin(BuiltinType::I64))
+                                    else => {
+                                        .error("Invalid type passed to reify()", expr.span)
+                                        throw Error::from_string_literal("Invalid type")
+                                    }
+                                }
+                                "U8" => match fields[0].evaluated().impl {
+                                    U8(x) => (CheckedNumericConstant::U8(x), builtin(BuiltinType::U8))
+                                    else => {
+                                        .error("Invalid type passed to reify()", expr.span)
+                                        throw Error::from_string_literal("Invalid type")
+                                    }
+                                }
+                                "U16" => match fields[0].evaluated().impl {
+                                    U16(x) => (CheckedNumericConstant::U16(x), builtin(BuiltinType::U16))
+                                    else => {
+                                        .error("Invalid type passed to reify()", expr.span)
+                                        throw Error::from_string_literal("Invalid type")
+                                    }
+                                }
+                                "U32" => match fields[0].evaluated().impl {
+                                    U32(x) => (CheckedNumericConstant::U32(x), builtin(BuiltinType::U32))
+                                    else => {
+                                        .error("Invalid type passed to reify()", expr.span)
+                                        throw Error::from_string_literal("Invalid type")
+                                    }
+                                }
+                                "U64" => match fields[0].evaluated().impl {
+                                    U64(x) => (CheckedNumericConstant::U64(x), builtin(BuiltinType::U64))
+                                    else => {
+                                        .error("Invalid type passed to reify()", expr.span)
+                                        throw Error::from_string_literal("Invalid type")
+                                    }
+                                }
+                                "F32" => match fields[0].evaluated().impl {
+                                    F32(x) => (CheckedNumericConstant::F32(x), builtin(BuiltinType::F32))
+                                    else => {
+                                        .error("Invalid type passed to reify()", expr.span)
+                                        throw Error::from_string_literal("Invalid type")
+                                    }
+                                }
+                                "F64" => match fields[0].evaluated().impl {
+                                    F64(x) => (CheckedNumericConstant::F64(x), builtin(BuiltinType::F64))
+                                    else => {
+                                        .error("Invalid type passed to reify()", expr.span)
+                                        throw Error::from_string_literal("Invalid type")
+                                    }
+                                }
+                                "USize" => match fields[0].evaluated().impl {
+                                    USize(x) => (CheckedNumericConstant::USize(x as! u64), builtin(BuiltinType::Usize))
+                                    else => {
+                                        .error("Invalid type passed to reify()", expr.span)
+                                        throw Error::from_string_literal("Invalid type")
+                                    }
+                                }
+                                else => {
+                                    .error("Invalid type passed to reify()", expr.span)
+                                    throw Error::from_string_literal("Invalid type")
+                                }
+                            }
+                            return CheckedExpression::NumericConstant(val: constant, span: expr.span, type_id: type)
+                        }
+                        else => {
+                            .error("Invalid type passed to reify()", expr.span)
+                            throw Error::from_string_literal("Invalid type")
+                        }
+                    }
+                    "QuotedString" => match fields[0].evaluated().impl {
+                        JaktString(x) => CheckedExpression::QuotedString(val: CheckedStringLiteral(
+                            value: StringLiteral::Static(x)
+                            type_id: .find_or_add_type_id(Type::Struct(.program.find_struct_in_prelude(name: "String")))
+                            may_throw: false
+                        ), span: expr.span)
+                        else => {
+                            .error("Invalid type passed to reify()", expr.span)
+                            throw Error::from_string_literal("Invalid type")
+                        }
+                    }
+                    "ByteConstant" => match fields[0].evaluated().impl {
+                        U8(x) => CheckedExpression::ByteConstant(val: format("{:c}", x), span: expr.span)
+                        else => {
+                            .error("Invalid type passed to reify()", expr.span)
+                            throw Error::from_string_literal("Invalid type")
+                        }
+                    }
+                    "CharacterConstant" => match fields[0].evaluated().impl {
+                        U32(x) => CheckedExpression::CharacterConstant(val: format("{}", x), span: expr.span)
+                        else => {
+                            .error("Invalid type passed to reify()", expr.span)
+                            throw Error::from_string_literal("Invalid type")
+                        }
+                    }
+                    "CCharacterConstant" => match fields[0].evaluated().impl {
+                        CChar(x) => CheckedExpression::CCharacterConstant(val: format("{:c}", x), span: expr.span)
+                        else => {
+                            .error("Invalid type passed to reify()", expr.span)
+                            throw Error::from_string_literal("Invalid type")
+                        }
+                    }
+                    "UnaryOp" => match fields[1].evaluated().impl {
+                        Enum(mut fields: op_fields, enum_id, constructor) => {
+                            let id = .program.find_reflected_primitive("UnaryOperator")
+                            guard id is Enum(eid) and eid.equals(enum_id) else {
+                                .error(format("Invalid type passed to reify(): {}", .program.type_name(type_id: .program.get_enum(enum_id).type_id)), expr.span)
+                                throw Error::from_string_literal("Invalid type")
+                            }
+
+                            let op = match .program.get_function(constructor).name {
+                                "PreIncrement" => CheckedUnaryOperator::PreIncrement
+                                "PreDecrement" => CheckedUnaryOperator::PreDecrement
+                                "PostIncrement" => CheckedUnaryOperator::PostIncrement
+                                "PostDecrement" => CheckedUnaryOperator::PostDecrement
+                                "Negate" => CheckedUnaryOperator::Negate
+                                "Dereference" => CheckedUnaryOperator::Dereference
+                                "Reference" => CheckedUnaryOperator::Reference
+                                "MutableReference" => CheckedUnaryOperator::MutableReference
+                                "RawAddress" => CheckedUnaryOperator::RawAddress
+                                "LogicalNot" => CheckedUnaryOperator::LogicalNot
+                                "BitwiseNot" => CheckedUnaryOperator::BitwiseNot
+                                "IsSome" => CheckedUnaryOperator::IsSome
+                                "IsNone" => CheckedUnaryOperator::IsNone
+                                "TypeCast" => { .compiler.panic("NYI") }
+                                "Is" => { .compiler.panic("NYI") }
+                                "IsEnumVariant" => { .compiler.panic("NYI") }
+                                else => {
+                                    .error("Invalid type passed to reify()", expr.span)
+                                    throw Error::from_string_literal("Invalid type")
+                                }
+                            }
+
+                            let expr = .reify(fields[0].evaluated(), scope)
+                            // FIXME: reify_type(fields[2].evaluated()) -> type_id
+                            return .typecheck_unary_operation(expr, op, span: expr.span(), scope, safety_mode: SafetyMode::Safe)
+                        }
+                        else => {
+                            .error("Invalid type passed to reify()", expr.span)
+                            throw Error::from_string_literal("Invalid type")
+                        }
+                    }
+                    "BinaryOp" => match fields[2].evaluated().impl {
+                        Enum(enum_id, constructor) => {
+                            let id = .program.find_reflected_primitive("BinaryOperator")
+                            guard id is Enum(eid) and eid.equals(enum_id) else {
+                                .error(
+                                    format("Invalid type passed to reify(): {}", .program.type_name(type_id: .program.get_enum(enum_id).type_id))
+                                    expr.span
+                                )
+                                throw Error::from_string_literal("Invalid type")
+                            }
+
+                            if fields.size() != 3 {
+                                println("Invalid number of fields in BinaryOp: {}", fields.size())
+                                .error("Invalid number of fields in BinaryOp", expr.span)
+                                throw Error::from_string_literal("Invalid type")
+                            }
+
+                            let op = match .program.get_function(constructor).name {
+                                "Add" => BinaryOperator::Add
+                                "Subtract" => BinaryOperator::Subtract
+                                "Multiply" => BinaryOperator::Multiply
+                                "Divide" => BinaryOperator::Divide
+                                "Modulo" => BinaryOperator::Modulo
+                                "LessThan" => BinaryOperator::LessThan
+                                "LessThanOrEqual" => BinaryOperator::LessThanOrEqual
+                                "GreaterThan" => BinaryOperator::GreaterThan
+                                "GreaterThanOrEqual" => BinaryOperator::GreaterThanOrEqual
+                                "Equal" => BinaryOperator::Equal
+                                "NotEqual" => BinaryOperator::NotEqual
+                                "BitwiseAnd" => BinaryOperator::BitwiseAnd
+                                "BitwiseXor" => BinaryOperator::BitwiseXor
+                                "BitwiseOr" => BinaryOperator::BitwiseOr
+                                "BitwiseLeftShift" => BinaryOperator::BitwiseLeftShift
+                                "BitwiseRightShift" => BinaryOperator::BitwiseRightShift
+                                "ArithmeticLeftShift" => BinaryOperator::ArithmeticLeftShift
+                                "ArithmeticRightShift" => BinaryOperator::ArithmeticRightShift
+                                "LogicalAnd" => BinaryOperator::LogicalAnd
+                                "LogicalOr" => BinaryOperator::LogicalOr
+                                "NoneCoalescing" => BinaryOperator::NoneCoalescing
+                                "Assign" => BinaryOperator::Assign
+                                "BitwiseAndAssign" => BinaryOperator::BitwiseAndAssign
+                                "BitwiseOrAssign" => BinaryOperator::BitwiseOrAssign
+                                "BitwiseXorAssign" => BinaryOperator::BitwiseXorAssign
+                                "BitwiseLeftShiftAssign" => BinaryOperator::BitwiseLeftShiftAssign
+                                "BitwiseRightShiftAssign" => BinaryOperator::BitwiseRightShiftAssign
+                                "AddAssign" => BinaryOperator::AddAssign
+                                "SubtractAssign" => BinaryOperator::SubtractAssign
+                                "MultiplyAssign" => BinaryOperator::MultiplyAssign
+                                "ModuloAssign" => BinaryOperator::ModuloAssign
+                                "DivideAssign" => BinaryOperator::DivideAssign
+                                "NoneCoalescingAssign" => BinaryOperator::NoneCoalescingAssign
+                                else => {
+                                    .error("Invalid value passed to reify()", expr.span)
+                                    throw Error::from_string_literal("Invalid type")
+                                }
+                            }
+
+                            let lhs = .reify(fields[0].evaluated(), scope)
+                            let rhs = .reify(fields[1].evaluated(), scope)
+
+                            // FIXME: reify_type(fields[3].evaluated()) -> type_id
+                            return .typecheck_binary_operation(lhs, rhs, op, span: expr.span, scope)
+                        }
+                        else => {
+                            .error(format("Invalid type passed to reify(): {}", .program.get_function(constructor).name), expr.span)
+                            throw Error::from_string_literal("Invalid type")
+                        }
+                    }
+                    "TupleLiteral" => {
+                        mut values: [CheckedExpression] = []
+                        mut types: [TypeId] = []
+                        for field in fields {
+                            let value = .reify(field.evaluated(), scope)
+                            values.push(value)
+                            types.push(value.type())
+                        }
+
+                        let tuple_struct_id = .program.find_struct_in_prelude("Tuple")
+                        yield CheckedExpression::JaktTuple(vals: values, span: expr.span, type_id: .find_or_add_type_id(Type::GenericInstance(id: tuple_struct_id, args: types)))
+                    }
+                    "RangeLiteral" => { throw Error::from_string_literal("NYI") }
+                    "ArrayLiteral" => {
+                        mut values: [CheckedExpression] = []
+                        let array_values = match fields[0].evaluated().impl {
+                            JaktArray(values) => values
+                            else => {
+                                .error("Invalid type passed to reify()", expr.span)
+                                throw Error::from_string_literal("Invalid type")
+                            }
+                        }
+                        for value in array_values {
+                            let v = .reify(value.evaluated(), scope)
+                            values.push(v)
+                        }
+
+                        let repeat: CheckedExpression? = match fields[1].evaluated().impl {
+                            OptionalSome(value) => .reify(value, scope)
+                            OptionalNone => None
+                            else => {
+                                .error("Invalid type passed to reify()", expr.span)
+                                throw Error::from_string_literal("Invalid type")
+                            }
+                        }
+
+                        // FIXME: reify_type(fields[3].evaluated()) -> type_id
+                        let type = .reify_type(ty: fields[2].evaluated())
+
+                        let array_struct_id = .program.find_struct_in_prelude("Array")
+                        yield CheckedExpression::JaktArray(
+                            vals: values
+                            repeat
+                            span: expr.span
+                            type_id: .find_or_add_type_id(Type::GenericInstance(id: array_struct_id, args: [type]))
+                            inner_type_id: type
+                        )
+                    }
+                    "SetLiteral" => { throw Error::from_string_literal("NYI") }
+                    "DictionaryLiteral" => { throw Error::from_string_literal("NYI") }
+                    else => {
+                        .error("Invalid type passed to reify()", expr.span)
+                        throw Error::from_string_literal("Invalid type")
+                    }
+                }
+            }
+            else => {
+                panic(format("Invalid use of reify({})", expr.impl))
+            }
+        }
+    }
+
     fn call_compiler_interface_function(
         mut this
         anon function: CheckedFunction
         arguments: [Value]
+        type_arguments: [TypeId]
         call_span: Span
         scope_id: ScopeId?
     ) throws -> StatementResult {
@@ -3361,6 +3814,34 @@ class Interpreter {
 
                 yield StatementResult::JustValue(Value(impl: ValueImpl::I32(scope_count), span: call_span))
             }
+            "throwsy_evaluate_expression_here_as" => {
+                let expr = .reify(arguments[0], scope: scope_id!)
+                let type_id = type_arguments[0]
+                if expr.type() != type_id {
+                    .error(
+                        format("Expression evaluates to {}, but type {} is requested", .program.type_name(expr.type()), .program.type_name(type_id))
+                        call_span
+                    )
+                }
+                yield StatementResult::JustValue(Value(
+                    impl: ValueImpl::UnevaluatedExpression(expr, type_id: type_arguments[0])
+                    span: call_span
+                ))
+            }
+            "evaluate_expression_here_as" => {
+                let expr = .reify(arguments[0], scope: scope_id!)
+                let type_id = type_arguments[0]
+                if expr.type() != type_id {
+                    .error(
+                        format("Expression evaluates to {}, but type {} is requested", .program.type_name(expr.type()), .program.type_name(type_id))
+                        call_span
+                    )
+                }
+                yield StatementResult::JustValue(Value(
+                    impl: ValueImpl::UnevaluatedExpression(expr, type_id: type_arguments[0])
+                    span: call_span
+                ))
+            }
             else => {
                 eprintln("Compiler interface function '{}' is not implemented", function.name)
                 .compiler.panic("Not yet implemented")
@@ -3401,14 +3882,21 @@ class Interpreter {
             // If this is a compiler interface function, or a prelude function, we can run it directly
             let function_scope = .program.get_scope(function_to_run.function_scope_id)
             // HACK: We shouldn't do this...
-            let parent_scope_name = match function_scope.parent.has_value() {
-                true => .program.get_scope(function_scope.parent!).debug_name
-                false => ""
+            mut parent_scope_name = ""
+            mut scope_ = function_scope.parent
+            while scope_.has_value() {
+                let scope = .program.get_scope(scope_!)
+                scope_ = scope.parent
+                parent_scope_name = scope.debug_name
+                if not scope.is_block_scope {
+                    break
+                }
             }
             if parent_scope_name == "module(jakt__compiler)" {
                 return match .call_compiler_interface_function(
                     function_to_run,
                     arguments,
+                    type_arguments: function_to_run.generics.mapped_types_from(invocation_scope?.type_map_for_substitution()?.values ?? [:])
                     call_span,
                     scope_id: runtime_scope_id
                 ) {
@@ -7251,6 +7739,39 @@ class Interpreter {
             ))
         }
         Reflect(type: type_id, span) => StatementResult::JustValue(.reflect_type(type_id, span, scope))
+        ReflectStatement(stmt, span) => {
+            let statement_enum_id = match .program.find_reflected_primitive("Statement") {
+                Enum(id) => id
+                else => {
+                    panic("Expected Statement to be an enum")
+                }
+            }
+
+            let expression_enum_id = match .program.find_reflected_primitive("Expression") {
+                Enum(id) => id
+                else => {
+                    panic("Expected Expression to be an enum")
+                }
+            }
+            yield StatementResult::JustValue(.reflect_statement(stmt, span, scope, statement_enum_id, expression_enum_id))
+        }
+        ReflectFunctionBlock(block, span) => {
+            let statement_enum_id = match .program.find_reflected_primitive("Statement") {
+                Enum(id) => id
+                else => {
+                    panic("Expected Statement to be an enum")
+                }
+            }
+
+            let expression_enum_id = match .program.find_reflected_primitive("Expression") {
+                Enum(id) => id
+                else => {
+                    panic("Expected Expression to be an enum")
+                }
+            }
+            let stmt = CheckedStatement::Block(block, span)
+            yield StatementResult::JustValue(.reflect_statement(stmt, span, scope, statement_enum_id, expression_enum_id))
+        }
         else => {
             .error(format("expression not implemented: {}", expr), expr.span())
             .compiler.panic("Not yet implemented")
@@ -7821,10 +8342,18 @@ class Interpreter {
                 for stmt in block.statements {
                     statements.push(as_unevaluated(fn[this, stmt, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_statement(stmt, span, scope, statement_enum_id, expression_enum_id)))
                 }
-                yield Value(
+                let blk = as_evaluated(Value(
                     impl: ValueImpl::JaktArray(
                         values: statements
                         type_id: .array_type_of_enum(statement_enum_id)
+                    )
+                    span
+                ))
+                yield Value(
+                    impl: ValueImpl::Enum(
+                        fields: [blk]
+                        enum_id: statement_enum_id
+                        constructor: statement_constructor("Block")
                     )
                     span
                 )
@@ -7834,10 +8363,18 @@ class Interpreter {
                 for stmt in block.statements {
                     statements.push(as_unevaluated(fn[this, stmt, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_statement(stmt, span, scope, statement_enum_id, expression_enum_id)))
                 }
-                yield Value(
+                let blk = as_evaluated(Value(
                     impl: ValueImpl::JaktArray(
                         values: statements
                         type_id: .array_type_of_enum(statement_enum_id)
+                    )
+                    span
+                ))
+                yield Value(
+                    impl: ValueImpl::Enum(
+                        fields: [blk]
+                        enum_id: statement_enum_id
+                        constructor: statement_constructor("Loop")
                     )
                     span
                 )
@@ -8176,7 +8713,7 @@ class Interpreter {
                 }
                 yield make_value("TupleLiteral", values)
             }
-            Range(from, to) => {
+            Range(from, to, type_id) => {
                 let from_value = match from.has_value() {
                     true => ValueImpl::OptionalSome(value: .reflect_expression(expr: from!, span, scope, statement_enum_id, expression_enum_id))
                     false => ValueImpl::OptionalNone
@@ -8185,26 +8722,46 @@ class Interpreter {
                     true => ValueImpl::OptionalSome(value: .reflect_expression(expr: to!, span, scope, statement_enum_id, expression_enum_id))
                     false => ValueImpl::OptionalNone
                 }
-                yield make_value("Range", as_evaluated([
-                    Value(impl: from_value, span)
-                    Value(impl: to_value, span)
-                ]))
+                let type = as_unevaluated(fn[this, type_id, span, scope]() throws -> Value => .reflect_type(type_id, span, scope))
+                yield make_value("Range", [
+                    as_evaluated(Value(impl: from_value, span))
+                    as_evaluated(Value(impl: to_value, span))
+                    type
+                ])
             }
-            JaktArray(vals) => {
+            JaktArray(vals, type_id) => {
+                mut fields: [LazyValue] = []
                 mut values: [LazyValue] = []
                 for val in vals {
                     values.push(as_unevaluated(fn[this, val, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_expression(expr: val, span, scope, statement_enum_id, expression_enum_id)))
                 }
-                yield make_value("ArrayLiteral", values)
+
+                // values:
+                fields.push(as_evaluated(.array_value_of_type(values, type: type_id, span)))
+                // repeat:
+                fields.push(as_evaluated(Value(
+                    impl: ValueImpl::OptionalNone
+                    span
+                )))
+                // type:
+                fields.push(as_unevaluated(fn[this, type_id, span, scope]() throws -> Value => .reflect_type(type_id, span, scope)))
+
+                yield make_value("ArrayLiteral", fields)
             }
-            JaktSet(vals) => {
+            JaktSet(vals, type_id) => {
                 mut values: [LazyValue] = []
                 for val in vals {
                     values.push(as_unevaluated(fn[this, val, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_expression(expr: val, span, scope, statement_enum_id, expression_enum_id)))
                 }
-                yield make_value("SetLiteral", values)
+                mut fields: [LazyValue] = []
+                // values:
+                fields.push(as_evaluated(.array_value_of_type(values, type: .array_type_of_enum(expression_enum_id), span)))
+                // type:
+                fields.push(as_unevaluated(fn[this, type_id, span, scope]() throws -> Value => .reflect_type(type_id, span, scope)))
+
+                yield make_value("SetLiteral", fields)
             }
-            JaktDictionary(vals, key_type_id, value_type_id) => {
+            JaktDictionary(vals, key_type_id, value_type_id, type_id) => {
                 mut values: [LazyValue] = []
                 for (key, val) in vals {
                     values.push(as_evaluated(Value(
@@ -8218,7 +8775,13 @@ class Interpreter {
                         span
                     )))
                 }
-                yield make_value("DictionaryLiteral", values)
+                mut fields: [LazyValue] = []
+                // values:
+                fields.push(as_evaluated(.array_value_of_type(values, type: .array_type_of_enum(expression_enum_id), span)))
+                // type:
+                fields.push(as_unevaluated(fn[this, type_id, span, scope]() throws -> Value => .reflect_type(type_id, span, scope)))
+
+                yield make_value("DictionaryLiteral", fields)
             }
             IndexedExpression(expr, index) => {
                 let expr_value = as_unevaluated(fn[this, expr, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_expression(expr, span, scope, statement_enum_id, expression_enum_id))
@@ -8321,6 +8884,8 @@ class Interpreter {
             Try => make_value("Try", []) // TODO
             TryBlock => make_value("TryBlock", []) // TODO
             Reflect(type_id) => make_value("Reflect", [as_unevaluated(fn[this, type_id, span, scope]() throws -> Value => .reflect_type(type_id, span, scope))])
+            ReflectStatement(stmt) => make_value("ReflectStatement", [as_unevaluated(fn[this, stmt, statement_enum_id, expression_enum_id, span, scope]() throws -> Value => .reflect_statement(stmt, span, scope, statement_enum_id, expression_enum_id))])
+            ReflectFunctionBlock => make_value("ReflectFunctionBlock", []) // TODO
             Garbage => {
                 throw Error::from_string_literal("Garbage expression in reflected object")
             }

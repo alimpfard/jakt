@@ -7319,6 +7319,27 @@ struct Typechecker {
                 module.functions.push(function)
                 return id
             }
+
+            unary_operation: fn[this](
+                expr: CheckedExpression
+                op: CheckedUnaryOperator
+                span: Span
+                scope_id: ScopeId
+                safety_mode: SafetyMode
+            ) throws -> CheckedExpression {
+                return .typecheck_unary_operation(checked_expr: expr, checked_op: op, span, scope_id, safety_mode)
+            }
+
+            binary_operation: fn[this](
+                lhs: CheckedExpression
+                rhs: CheckedExpression
+                op: BinaryOperator
+                span: Span
+                scope_id: ScopeId
+            ) throws -> CheckedExpression {
+                let (checked_op, output_type) = .typecheck_binary_operation(checked_lhs: lhs, op, checked_rhs: rhs, scope_id, span)
+                return CheckedExpression::BinaryOp(lhs, op: checked_op, rhs, span, type_id: output_type)
+            }
         )
         spans: []
     )
@@ -7413,6 +7434,8 @@ struct Typechecker {
         | CharacterConstant
         | CCharacterConstant
         | Reflect
+        | ReflectStatement
+        | ReflectFunctionBlock
         => (.root_scope_id(), expr)
         // Immediate values, let's not have lifetime extension for now.
         BinaryOp => (None, expr)
@@ -8777,6 +8800,73 @@ struct Typechecker {
                 type: reflected_type
                 span
                 type_id: .find_or_add_type_id(Type::Enum(reflected_type_enum_id)))
+        }
+        ReflectStatement(stmt, span) => {
+            let reflected_statement_enum_id = match .program.find_reflected_primitive(primitive: "Statement") {
+                Enum(id) => id
+                else => {
+                    .compiler.panic("unreachable")
+                }
+            }
+
+            let reflected_statement = .typecheck_statement(stmt, scope_id, safety_mode)
+            yield CheckedExpression::ReflectStatement(
+                stmt: reflected_statement
+                span
+                type_id: .find_or_add_type_id(Type::Enum(reflected_statement_enum_id)))
+        }
+        ReflectFunctionBlock(func, span) => {
+            let reflected_statement_enum_id = match .program.find_reflected_primitive(primitive: "Statement") {
+                Enum(id) => id
+                else => {
+                    .compiler.panic("unreachable")
+                }
+            }
+
+            let empty = CheckedBlock(
+                scope_id
+                control_flow: BlockControlFlow::MayReturn
+            )
+            let reflected_function: CheckedBlock = match func {
+                else => {
+                    let checked_expr = .typecheck_expression(func, scope_id, safety_mode, type_hint: None)
+                    mut interpreter = .interpreter()
+                    mut eval_scope = InterpreterScope::from_runtime_scope(scope_id, program: .program)
+                    for entry in .generic_inferences.iterator() {
+                        let (key, value) = entry
+                        eval_scope.type_bindings.set(key, value)
+                    }
+                    let evald = interpreter.execute_expression(expr: checked_expr, scope: eval_scope)
+                    yield match evald {
+                        JustValue(value) => match value.impl {
+                            Function(block) => block
+                            else => {
+                                .error("Expected a function", span)
+                                yield empty
+                            }
+                        }
+                        Throw(t) => {
+                            .error(
+                                comptime_format_impl(
+                                    format_string: "Error executing this expression (evaluation threw {})"
+                                    arguments: [t][..]
+                                    program: &.program
+                                )
+                                span)
+                            yield empty
+                        }
+                        else => {
+                            .error("Expected a function", span)
+                            yield empty
+                        }
+                    }
+                }
+            }
+
+            yield CheckedExpression::ReflectFunctionBlock(
+                block: reflected_function
+                span
+                type_id: .find_or_add_type_id(Type::Enum(reflected_statement_enum_id)))
         }
         UnaryOp(expr, op, span) => {
             let checked_expr = match op {

@@ -351,10 +351,10 @@ namespace Reflect {
             op: Reflect::BinaryOperator
         )
         TupleLiteral([Reflect::Expression])
-        RangeLiteral(from: Reflect::Expression?, to: Reflect::Expression?)
-        ArrayLiteral(values: [Reflect::Expression], repeat: Reflect::Expression?)
-        SetLiteral(values: [Reflect::Expression])
-        DictionaryLiteral([(Reflect::Expression, Reflect::Expression)])
+        RangeLiteral(from: Reflect::Expression?, to: Reflect::Expression?, type: Reflect::Type)
+        ArrayLiteral(values: [Reflect::Expression], repeat: Reflect::Expression?, type: Reflect::Type)
+        SetLiteral(values: [Reflect::Expression], type: Reflect::Type)
+        DictionaryLiteral(entries: [(Reflect::Expression, Reflect::Expression)], type: Reflect::Type)
         IndexedExpression(base: Reflect::Expression, index: Reflect::Expression)
         IndexedDictionary(base: Reflect::Expression, key: Reflect::Expression)
         IndexedTuple(base: Reflect::Expression, index: usize, is_optional: bool)
@@ -376,7 +376,7 @@ namespace Reflect {
         Var(
             name: String
         )
-        OptionalNone
+        OptionalNone(type: Reflect::Type)
         OptionalSome(Reflect::Expression)
         ForcedUnwrap(Reflect::Expression)
         Block([Reflect::Statement])
@@ -400,6 +400,8 @@ namespace Reflect {
             catch_block: [Reflect::Statement]
         )
         Reflect(type: Reflect::Type)
+        ReflectStatement(statement: Reflect::Statement)
+        ReflectFunctionBlock(block: [Reflect::Statement])
     }
     struct Call {
         namespaces: [String]

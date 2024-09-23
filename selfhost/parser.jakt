@@ -1135,6 +1135,8 @@ boxed enum ParsedExpression {
     Try(expr: ParsedExpression, catch_block: ParsedBlock?, catch_span: Span?, catch_name: String?, span: Span)
     TryBlock(stmt: ParsedStatement, error_name: String, error_span: Span, catch_block: ParsedBlock, span: Span)
     Reflect(type: ParsedType, span: Span)
+    ReflectStatement(stmt: ParsedStatement, span: Span)
+    ReflectFunctionBlock(func: ParsedExpression, span: Span)
     Garbage(Span)
     Unsafe(expr: ParsedExpression, span: Span)
 
@@ -1445,6 +1447,14 @@ boxed enum ParsedExpression {
         }
         Reflect(type) => match rhs_expression {
             Reflect(type: rhs_type) => type.equals(rhs_type)
+            else => false
+        }
+        ReflectStatement(stmt) => match rhs_expression {
+            ReflectStatement(stmt: rhs_stmt) => stmt.equals(rhs_stmt)
+            else => false
+        }
+        ReflectFunctionBlock(func) => match rhs_expression {
+            ReflectFunctionBlock(func: rhs_func) => func.equals(rhs_func)
             else => false
         }
         Garbage => rhs_expression is Garbage
@@ -5199,9 +5209,24 @@ struct Parser {
         Reflect(span) => {
             let start = .current().span()
             .index++
-            let type = .parse_typename()
-            let span = merge_spans(start, type.span())
-            yield ParsedExpression::Reflect(type, span)
+            yield match .current() {
+                LCurly => {
+                    let statement = .parse_statement(inside_block: false)
+                    let span = merge_spans(start, statement.span())
+                    yield ParsedExpression::ReflectStatement(stmt: statement, span)
+                }
+                Asterisk => {
+                    .index++
+                    let expr = .parse_expression(allow_assignments: false, allow_newlines: false)
+                    let span = merge_spans(start, expr.span())
+                    yield ParsedExpression::ReflectFunctionBlock(func: expr, span)
+                }
+                else => {
+                    let type = .parse_typename()
+                    let span = merge_spans(start, type.span())
+                    yield ParsedExpression::Reflect(type, span)
+                }
+            }
         }
         Identifier(name, span) => {
             if .peek(1) is LParen {

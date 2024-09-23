@@ -8,9 +8,9 @@
 import parser { BinaryOperator, FunctionLinkage, ParsedBlock }
 import typechecker {
     BuiltinType, CheckedBinaryOperator, CheckedBlock, CheckedCall, CheckedEnum, CheckedExpression, CheckedFunction
-    CheckedMatchBody, CheckedMatchCase, CheckedMatchPattern, CheckedProgram, CheckedStatement, CheckedStruct, CheckedVariable
-    CheckedVisibility, EnumId, FunctionId, Module, ModuleId, Scope, ScopeId, StructId, Type, TypeId, VarId, builtin
-    never_type_id, unknown_type_id, void_type_id
+    CheckedMatchBody, CheckedMatchCase, CheckedMatchPattern, CheckedProgram, CheckedStatement, CheckedStruct
+    CheckedUnaryOperator, CheckedVariable, CheckedVisibility, EnumId, FunctionId, Module, ModuleId, Scope, ScopeId
+    StructId, Type, TypeId, VarId, builtin, never_type_id, unknown_type_id, void_type_id
 }
 import types { CheckedGenericParameter, CheckedParameter, FunctionGenericParameter, SafetyMode, StructLikeId }
 import utility { Queue, Span, escape_for_quotes, interpret_escapes, join, panic, prepend_to_each, todo }
@@ -2674,7 +2674,7 @@ struct CodeGenerator {
         defer .generic_inferences = None
 
         match expression {
-            Reflect(span) => {
+            ReflectFunctionBlock(span) | ReflectStatement(span) | Reflect(span) => {
                 panic(format("Unexpected reflect expression at {}", span))
             }
             Range(from, to, type_id) => {
@@ -4984,6 +4984,27 @@ struct CodeGenerator {
                             function: CheckedFunction
                         ) throws -> FunctionId {
                             panic("Cannot typecheck a const function")
+                        }
+
+                        unary_operation: fn[this](
+                            expr: CheckedExpression
+                            op: CheckedUnaryOperator
+                            span: Span
+                            scope_id: ScopeId
+                            safety_mode: SafetyMode
+                        ) throws -> CheckedExpression {
+                            panic("Cannot typecheck a const unary operation")
+                        }
+
+
+                        binary_operation: fn[this](
+                            lhs: CheckedExpression
+                            rhs: CheckedExpression
+                            op: BinaryOperator
+                            span: Span
+                            scope_id: ScopeId
+                        ) throws -> CheckedExpression {
+                            panic("Cannot typecheck a const binary operation")
                         }
                     )
                     spans: []

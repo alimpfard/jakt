@@ -1,6 +1,8 @@
 extern fn target_triple_string() throws -> String
 extern fn user_configuration_value(name: StringView) -> StringView?
 extern fn debug_this_scope(breakpoint: bool = false) -> i32
+extern fn throwsy_evaluate_expression_here_as<T, V>(anon expr: V) throws -> T
+extern fn evaluate_expression_here_as<T, V>(anon expr: V) -> T
 
 namespace debug {
     comptime this_scope(breakpoint: bool = false) -> i32 => debug_this_scope(breakpoint)

@@ -1006,6 +1006,14 @@ class FunctionGenerics {
     public params: [FunctionGenericParameter] = []
     public specializations: [[TypeId]] = []
 
+    public fn mapped_types_from(this, anon inferences: [TypeId:TypeId]) -> [TypeId] {
+        mut result: [TypeId] = []
+        for param in .params {
+            result.push(inferences.get(param.checked_parameter.type_id) ?? unknown_type_id())
+        }
+        return result
+    }
+
     public fn is_specialized_for_types(this, types: [TypeId]) -> bool {
         if types.size() == 0 {
             return true
@@ -1703,6 +1711,8 @@ boxed enum CheckedExpression {
     )
     TryBlock(stmt: CheckedStatement, catch_block: CheckedBlock, error_name: String, error_span: Span, span: Span, type_id: TypeId)
     Reflect(type: TypeId, span: Span, type_id: TypeId)
+    ReflectStatement(stmt: CheckedStatement, span: Span, type_id: TypeId)
+    ReflectFunctionBlock(block: CheckedBlock, span: Span, type_id: TypeId)
     Garbage(span: Span, type_id: TypeId)
 
     fn to_number_constant(this, program: CheckedProgram) -> NumberConstant? => match this {
@@ -3271,6 +3281,7 @@ boxed enum ValueImpl {
         scope_id: ScopeId
         pseudo_function_id: FunctionId?
     )
+    UnevaluatedExpression(expr: CheckedExpression, type_id: TypeId)
 
     fn type_id(this, anon program: &mut CheckedProgram) throws -> TypeId => match this {
         Void => void_type_id()
@@ -3293,8 +3304,10 @@ boxed enum ValueImpl {
         Struct(struct_id) => program.find_or_add_type_id(Type::Struct(struct_id), module_id: struct_id.module)
         Class(struct_id) => program.find_or_add_type_id(Type::Struct(struct_id), module_id: struct_id.module)
         Enum(enum_id) => program.find_or_add_type_id(Type::Enum(enum_id), module_id: enum_id.module)
+        Function(type_id) => type_id
+        UnevaluatedExpression(type_id) => type_id
         else => {
-            panic("Reflected value type not implemented")
+            panic(format("Reflected value type not implemented: {}", this))
         }
     }
 
@@ -3387,6 +3400,7 @@ boxed enum ValueImpl {
             scope_id
             pseudo_function_id
         )
+        UnevaluatedExpression(expr, type_id) => ValueImpl::UnevaluatedExpression(expr, type_id)
     }
 
     fn equals(this, anon other: ValueImpl) -> bool => match this {
@@ -3445,6 +3459,7 @@ struct Value {
         OptionalNone => "None"
         JaktTuple => "Tuple"
         Function => "Function"
+        UnevaluatedExpression => "UnevaluatedExpression"
     }
 
     fn cast(this, anon expected: Value, span: Span) -> Value => match .impl {
@@ -3521,6 +3536,22 @@ class TypecheckFunctions {
     public register_function: fn(
         checked_function: CheckedFunction
     ) throws -> FunctionId
+
+    public unary_operation: fn(
+        expr: CheckedExpression
+        op: CheckedUnaryOperator
+        span: Span
+        scope_id: ScopeId
+        safety_mode: SafetyMode
+    ) throws -> CheckedExpression
+
+    public binary_operation: fn(
+        lhs: CheckedExpression
+        rhs: CheckedExpression
+        op: BinaryOperator
+        span: Span
+        scope_id: ScopeId
+    ) throws -> CheckedExpression
 }
 
 fn format_value_if_evaluated(anon format_string: String, anon value: LazyValue, program: &CheckedProgram) throws -> String {
@@ -3671,6 +3702,13 @@ fn format_value_impl(anon format_string: String, anon value: Value, program: &Ch
 
         builder.append(']')
         yield builder.to_string()
+    }
+    Function(pseudo_function_id) => match pseudo_function_id.has_value() {
+        true => {
+            let function = program.get_function(pseudo_function_id!)
+            yield format("fn {}", function.name)
+        }
+        false => runtime_format(format_string, "<function>")
     }
 
     else => {
