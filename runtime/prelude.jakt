@@ -429,6 +429,8 @@ namespace Reflect {
         record_type: Reflect::RecordType
     }
     boxed enum Type {
+        ___jakt_internal_type_id: u64 = 0
+
         Void
         Bool
         U8

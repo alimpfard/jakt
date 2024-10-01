@@ -4433,6 +4433,8 @@ struct Typechecker {
                 id: current_module.types.size()
             )
 
+            mut value_var_id: VarId? = None
+
             if base_definition {
                 mut parameter = FunctionGenericParameter::parameter(type_var_type_id, span: generic_parameter.span)
                 mut trait_implementations: [TypeId] = []
@@ -4452,6 +4454,17 @@ struct Typechecker {
                 type_var_type_id = checked_function.generics.params[i].type_id()
             }
 
+            if generic_parameter.is_value {
+                value_var_id = current_module.add_variable(CheckedVariable(
+                    name: generic_parameter.name
+                    type_id: type_var_type_id
+                    is_mutable: false
+                    definition_span: generic_parameter.span
+                    type_span: None
+                    visibility: CheckedVisibility::Public
+                ))
+            }
+
             if not parsed_function.must_instantiate or external_linkage {
                 .add_type_to_scope(
                     scope_id: checked_function_scope_id
@@ -4459,6 +4472,36 @@ struct Typechecker {
                     type_id: type_var_type_id
                     span: generic_parameter.span
                 )
+
+                if generic_parameter.is_value {
+                    .add_var_to_scope(
+                        scope_id: checked_function_scope_id
+                        name: generic_parameter.name
+                        var_id: value_var_id!
+                        span: generic_parameter.span
+                    )
+                    let mapped_ty = .generic_inferences.map(type_var_type_id)
+                    let tv = .get_type(mapped_ty)
+                    .add_comptime_binding_to_scope(
+                        scope_id: checked_function_scope_id
+                        name: generic_parameter.name
+                        value: match tv {
+                            TypeVariable => Value(
+                                impl: ValueImpl::UnevaluatedExpression(
+                                    expr: CheckedExpression::Garbage(span: generic_parameter.span, type_id: unknown_type_id())
+                                    type_id: unknown_type_id()
+                                )
+                                span: generic_parameter.span
+                            )
+                            else => .interpreter().reflect_type(
+                                type_id: mapped_ty
+                                span: generic_parameter.span
+                                scope: InterpreterScope::from_runtime_scope(scope_id: checked_function_scope_id, program: .program)
+                            )
+                        }
+                        span: generic_parameter.span
+                    )
+                }
             }
 
             if check_scope.has_value() {
@@ -4468,6 +4511,36 @@ struct Typechecker {
                     type_id: type_var_type_id
                     span: generic_parameter.span
                 )
+
+                if generic_parameter.is_value {
+                    .add_var_to_scope(
+                        scope_id: check_scope!
+                        name: generic_parameter.name
+                        var_id: value_var_id!
+                        span: generic_parameter.span
+                    )
+                    let mapped_ty = .generic_inferences.map(type_var_type_id)
+                    let tv = .get_type(mapped_ty)
+                    .add_comptime_binding_to_scope(
+                        scope_id: check_scope!
+                        name: generic_parameter.name
+                        value: match tv {
+                            TypeVariable => Value(
+                                impl: ValueImpl::UnevaluatedExpression(
+                                    expr: CheckedExpression::Garbage(span: generic_parameter.span, type_id: unknown_type_id())
+                                    type_id: unknown_type_id()
+                                )
+                                span: generic_parameter.span
+                            )
+                            else => .interpreter().reflect_type(
+                                type_id: mapped_ty
+                                span: generic_parameter.span
+                                scope: InterpreterScope::from_runtime_scope(scope_id: check_scope!, program: .program)
+                            )
+                        }
+                        span: generic_parameter.span
+                    )
+                }
             }
 
             i++
@@ -4799,7 +4872,7 @@ struct Typechecker {
             for i in 0..params.size() {
                 let param = params[i]
                 let arg = generic_substitutions.map(args[i])
-                guard .get_type(param.type_id) is TypeVariable(name: type_name) else { continue }
+                guard .get_type(param.type_id) is TypeVariable(name: type_name, is_value) else { continue }
 
                 let dependent_scope_id: ScopeId? = match .get_type(param.type_id) {
                     GenericInstance(id: struct_id) | Struct(struct_id) => .get_struct(struct_id).scope_id
@@ -4831,17 +4904,17 @@ struct Typechecker {
             .add_type_to_scope(scope_id, type_name, type_id, span)
 
             mut scope = .get_scope(scope_id)
-            if is_value and .get_type(type_id) is Const(value) {
+            if is_value {
+                mut scope = .get_scope(scope_id)
+                let value = match .get_type(type_id) {
+                    Const(value) => value
+                    else => .interpreter().reflect_type(
+                        type_id
+                        span
+                        scope: InterpreterScope::from_runtime_scope(scope_id, program: .program)
+                    )
+                }
                 scope.comptime_bindings[type_name] = value
-                let checked_var = CheckedVariable(
-                    name: type_name
-                    type_id: value.impl.type_id(&mut .program)
-                    is_mutable: false
-                    definition_span: value.span
-                    type_span: None
-                    visibility: CheckedVisibility::Public
-                )
-                scope.vars[type_name] = module.add_variable(checked_var)
             }
 
             if dependent_scope_id.has_value() {
@@ -5885,6 +5958,12 @@ struct Typechecker {
                 mut scope = InterpreterScope::from_runtime_scope(scope_id, program: .program)
                 let value = try interpreter.execute_expression(expr: checked_expr, scope)
                 if value.has_value() and value! is JustValue(resolved_value) {
+                    if resolved_value.impl is Enum(enum_id)
+                        and .program.find_reflected_primitive("Type") is Enum(id)
+                        and id.equals(enum_id) 
+                    {
+                        return interpreter.reify_type(resolved_value)
+                    }
                     return .find_or_add_type_id(Type::Const(resolved_value))
                 }
 
@@ -11826,6 +11905,13 @@ struct Typechecker {
                 type_args: call.type_args,
                 call_span: span
                 args
+            )
+        }
+
+        if resolved_function_id.has_value() {
+            return_type = .substitute_typevars_in_type(
+                type_id: .get_function(resolved_function_id!).return_type_id,
+                generic_inferences: .generic_inferences
             )
         }
 

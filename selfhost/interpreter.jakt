@@ -462,7 +462,7 @@ fn cast_value_to_type(anon this_value: Value, anon type_id: TypeId, interpreter:
 fn value_to_checked_expression(anon this_value: Value, anon mut interpreter: Interpreter) throws -> CheckedExpression => match this_value.impl {
     Void => {
         interpreter.error("Cannot convert void to expression", this_value.span)
-        interpreter.compiler.panic("Invalid type")
+        return CheckedExpression::Garbage(span: this_value.span, type_id: void_type_id())
     }
     Bool(x)  => CheckedExpression::Boolean(val: x, span: this_value.span)
     U8(x)    => CheckedExpression::NumericConstant(val: CheckedNumericConstant::U8(x), span: this_value.span, type_id: builtin(BuiltinType::U8))
@@ -3363,12 +3363,20 @@ class Interpreter {
         }
     }
 
-    fn reify_type(mut this, anon ty: Value) throws -> TypeId => match ty.impl {
+    public fn reify_type(mut this, anon ty: Value) throws -> TypeId => match ty.impl {
         Enum(mut fields, enum_id, constructor) => {
             let id = .program.find_reflected_primitive("Type")
             guard id is Enum(eid) and eid.equals(enum_id) else {
                 .error(format("Invalid type passed to reify_type(): {}", .program.type_name(type_id: .program.get_enum(enum_id).type_id)), ty.span)
                 throw Error::from_string_literal("Invalid type")
+            }
+
+            if fields[0].evaluated().impl is OptionalSome(value: internal_id) and internal_id.impl is U64(x) and x != 0 {
+                let type_id = TypeId(
+                    module: ModuleId(id: (x >> 32) as! usize)
+                    id: (x & 0xFFFFFFFF) as! usize - 1
+                )
+                return type_id
             }
 
             return match .program.get_function(constructor).name {
@@ -3384,35 +3392,113 @@ class Interpreter {
                 "F64" => builtin(BuiltinType::F64)
                 "USize" => builtin(BuiltinType::Usize)
                 "Bool" => builtin(BuiltinType::Bool)
-                "String" => builtin(BuiltinType::JaktString)
+                "JaktString" => .find_or_add_type_id(Type::Struct(.program.find_struct_in_prelude("String")))
+                "CChar" => builtin(BuiltinType::CChar)
+                "CInt" => builtin(BuiltinType::CInt)
+                "Never" => builtin(BuiltinType::Never)
+                "Void" => builtin(BuiltinType::Void)
+                "Unknown" => builtin(BuiltinType::Unknown)
                 "Array" => {
-                    let element_type = .reify_type(fields[0].evaluated())
+                    let element_type = .reify_type(fields[1].evaluated())
                     let id = .program.find_struct_in_prelude("Array")
                     yield .find_or_add_type_id(Type::GenericInstance(id, args: [element_type]))
                 }
                 "Set" => {
-                    let element_type = .reify_type(fields[0].evaluated())
+                    let element_type = .reify_type(fields[1].evaluated())
                     let id = .program.find_struct_in_prelude("Set")
                     yield .find_or_add_type_id(Type::GenericInstance(id, args: [element_type]))
                 }
                 "Dictionary" => {
-                    let key_type = .reify_type(fields[0].evaluated())
-                    let value_type = .reify_type(fields[1].evaluated())
+                    let key_type = .reify_type(fields[1].evaluated())
+                    let value_type = .reify_type(fields[2].evaluated())
                     let id = .program.find_struct_in_prelude("Dictionary")
                     yield .find_or_add_type_id(Type::GenericInstance(id, args: [key_type, value_type]))
                 }
                 "Optional" => {
-                    let element_type = .reify_type(fields[0].evaluated())
+                    let element_type = .reify_type(fields[1].evaluated())
                     let id = .program.find_struct_in_prelude("Optional")
                     yield .find_or_add_type_id(Type::GenericInstance(id, args: [element_type]))
                 }
                 "Tuple" => {
                     mut types: [TypeId] = []
-                    for field in fields {
+                    for field in fields[1..] {
                         types.push(.reify_type(field.evaluated()))
                     }
                     let id = .program.find_struct_in_prelude("Tuple")
                     yield .find_or_add_type_id(Type::GenericInstance(id, args: types))
+                }
+                "StructureOrEnum" => {
+                    /// StructureOrEnum(Record)
+                    /// Record { name: String, methods: [Method], generic_mappings: [(String, Type)], record_type: RecordType }
+                    /// RecordType = Struct([Field]) | Class([Field]) | ValueEnum(underlying_type, variants: [String]) | SumEnum(boxed, variants: [SumEnumVariant])
+                    /// SumEnumVariant = StructLike(name, fields) | Typed(name, type) | Untyped(name)
+                    /// Field { variable: VariableDeclaration, visibility: Visibility }
+                    /// VariableDeclaration { name, type, is_mutable }
+                    /// Visibility = Public | Private
+
+                    match fields[1].evaluated().impl {
+                        Struct(mut fields) => {
+                            let name = match fields[0].evaluated().impl {
+                                JaktString(value) => value
+                                else => {
+                                    .error("Invalid type passed to reify_type()", ty.span)
+                                    throw Error::from_string_literal("Invalid type")
+                                }
+                            }
+                            // TODO: methods, generic_mappings.
+                            match fields[3].evaluated().impl {
+                                Enum(mut fields, constructor) => {
+                                    match .program.get_function(constructor).name {
+                                        "Struct" => {
+                                        }
+                                        "Class" => {
+                                        }
+                                        "ValueEnum" => {}
+                                        "SumEnum" => {}
+                                        else => {
+                                            .error("Invalid type passed to reify_type()", ty.span)
+                                            throw Error::from_string_literal("Invalid type")
+                                        }
+                                    }
+                                }
+                                else => {
+                                    .error("Invalid type passed to reify_type()", ty.span)
+                                    throw Error::from_string_literal("Invalid type")
+                                }
+                            }
+
+                            abort()
+                        }
+                        else => {
+                            .error("Invalid type passed to reify_type()", ty.span)
+                            throw Error::from_string_literal("Invalid type")
+                        }
+                    }
+                }
+                "TypeVariable" => {
+                    let name = match fields[1].evaluated().impl {
+                        JaktString(value) => value
+                        else => {
+                            .error("Invalid type passed to reify_type()", ty.span)
+                            throw Error::from_string_literal("Invalid type")
+                        }
+                    }
+                    yield .find_or_add_type_id(Type::TypeVariable(name, trait_implementations: []))
+                }
+                "RawPtr" => {
+                    let pointee_type = .reify_type(fields[1].evaluated())
+                    yield .find_or_add_type_id(Type::RawPtr(pointee_type))
+                }
+                "Reference" => {
+                    let pointee_type = .reify_type(fields[1].evaluated())
+                    yield .find_or_add_type_id(Type::Reference(pointee_type))
+                }
+                "MutableReference" => {
+                    let pointee_type = .reify_type(fields[1].evaluated())
+                    yield .find_or_add_type_id(Type::MutableReference(pointee_type))
+                }
+                "Function" => {
+                    throw Error::from_string_literal("Not yet implemented")
                 }
                 else => {
                     .error("Invalid type passed to reify_type()", ty.span)
@@ -7298,7 +7384,8 @@ class Interpreter {
                 }
             }
             guard value.impl is JaktTuple(&mut fields) else {
-                panic("expected tuple")
+                .error("Invalid type for tuple indexing", value.span)
+                return StatementResult::JustValue(value)
             }
 
             mut f = fields // HACK: &mut fields doesn't make a mutable binding
@@ -7772,6 +7859,7 @@ class Interpreter {
             let stmt = CheckedStatement::Block(block, span)
             yield StatementResult::JustValue(.reflect_statement(stmt, span, scope, statement_enum_id, expression_enum_id))
         }
+        Garbage(span) => StatementResult::JustValue(Value(impl: ValueImpl::Void, span))
         else => {
             .error(format("expression not implemented: {}", expr), expr.span())
             .compiler.panic("Not yet implemented")
@@ -7862,6 +7950,21 @@ class Interpreter {
         let type = Type::Struct(string_struct_id)
         return .find_or_add_type_id(type)
     }
+
+    public fn optional_value(mut this, anon value: Value, span) throws -> Value => Value(
+        impl: ValueImpl::OptionalSome(value)
+        span
+    )
+
+    public fn optional_value(mut this, span) throws -> Value => Value(
+        impl: ValueImpl::OptionalNone
+        span
+    )
+
+    public fn u64_value(mut this, anon value: u64, span: Span) throws -> Value => Value(
+        impl: ValueImpl::U64(value)
+        span
+    )
 
     public fn string_value(mut this, anon string: String, span: Span) throws -> Value => Value(
         impl: ValueImpl::JaktString(string)
@@ -8989,9 +9092,17 @@ class Interpreter {
             }
         }
         let reflected_enum = .program.get_enum(reflected_enum_id)
+        let type_id_indicator = as_evaluated(.optional_value(
+            value: .u64_value(
+                value: ((mapped_type_id.module.id as! u64 << 32) | (mapped_type_id.id as! u64)) + 1
+                span
+            )
+            span
+        ))
+
         mut result = Value(
             impl: ValueImpl::Enum(
-                fields: []
+                fields: [type_id_indicator]
                 enum_id: reflected_enum_id
                 constructor: FunctionId(module: type_id.module, id: 0)
             )
@@ -9324,6 +9435,8 @@ class Interpreter {
                 yield constructor
             }
         }
+
+        fields.insert(before_index: 0, value: type_id_indicator)
 
         match result.impl {
             Enum(&mut fields: x, &mut constructor) => {

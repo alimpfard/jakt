@@ -3710,6 +3710,7 @@ fn format_value_impl(anon format_string: String, anon value: Value, program: &Ch
         }
         false => runtime_format(format_string, "<function>")
     }
+    UnevaluatedExpression(expr, type_id) => format("<unevaluated expression of type {}>", program.type_name(type_id))
 
     else => {
         eprintln("Cannot format value {}", value.impl)

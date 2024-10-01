@@ -951,13 +951,26 @@ struct CodeGenerator {
 
             output.append("<")
             mut first = true
+            mut ti = 0uz
             for type_id in function.generics.specializations[function.specialization_index!] {
+                defer ti += 1
+
                 if first {
                     first = false
                 } else {
                     output.append(", ")
                 }
-                output.append(.codegen_type(type_id))
+
+                mut type_name = .codegen_type(type_id)
+                if not .program.get_type(type_id) is Const and
+                    ti <= function.generics.params.size() and
+                    .program.get_type(function.generics.params[ti].checked_parameter.type_id) is TypeVariable(is_value) and
+                    is_value
+                {
+                    type_name = format("JaktInternal::AsValue<{}>", type_name)
+                }
+
+                output.append(type_name)
             }
 
             output.append(">(")
@@ -1504,15 +1517,16 @@ struct CodeGenerator {
             } else {
                 output.append(",")
             }
-            if .program.get_type(id) is TypeVariable(is_value) and is_value {
+            if .program.get_type(id) is TypeVariable(name, is_value) and is_value {
                 output.append("auto ")
+                output.append(name)
+                names.push(name)
             } else {
                 output.append("typename ")
+                let name = .codegen_type(id)
+                output.append(name)
+                names.push(name)
             }
-            let name = .codegen_type(id)
-
-            output.append(name)
-            names.push(name)
         }
     }
 
@@ -4551,9 +4565,11 @@ struct CodeGenerator {
             }
             else => {
                 mut close_enum_type_wrapper = false
+                mut generics: [FunctionGenericParameter] = []
                 if call.function_id.has_value() {
                     let function_id = call.function_id!
                     let function = .program.get_function(function_id)
+                    generics = function.generics.params
                     let type_module = .program.get_module(function_id.module)
                     .used_modules.add(function_id.module)
 
@@ -4648,7 +4664,16 @@ struct CodeGenerator {
                 if not generic_parameters.is_empty() {
                     mut types: [String] = []
                     for gen_param in generic_parameters {
-                        types.push(.codegen_type_possibly_as_namespace(type_id: gen_param, as_namespace: false))
+                        mut type_name = .codegen_type_possibly_as_namespace(type_id: gen_param, as_namespace: false)
+                        if not .program.get_type(gen_param) is Const and
+                            types.size() <= generics.size() and
+                            .program.get_type(generics[types.size()].checked_parameter.type_id) is TypeVariable(is_value) and
+                            is_value
+                        {
+                            type_name = format("JaktInternal::AsValue<{}>", type_name)
+                        }
+
+                        types.push(type_name)
                     }
                     output.appendff("<{}>", join(types, separator: ", "))
                 }
@@ -5010,6 +5035,10 @@ struct CodeGenerator {
                     spans: []
                 )
                 let expr = value_to_checked_expression(value, interpreter)
+                if expr is Garbage {
+                    return "auto" // This doesn't actually exist.
+                }
+
                 mut builder = StringBuilder::create()
                 .codegen_expression(expr, output: &mut builder)
                 yield builder.to_string()
@@ -5038,7 +5067,10 @@ struct CodeGenerator {
                 .codegen_generic_enum_instance(id, args, as_namespace, output: &mut builder)
                 yield builder.to_string()
             }
-            TypeVariable(name) => name
+            TypeVariable(name, is_value) => match is_value {
+                true => "auto" // This doesn't actually exist.
+                false => name
+            }
             Function(params, can_throw, return_type_id) => {
                 mut builder = StringBuilder::create()
                 builder.append("Function<")

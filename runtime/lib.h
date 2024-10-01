@@ -56,6 +56,9 @@
 namespace JaktInternal {
 template<typename T>
 class Set;
+
+template<typename T>
+constexpr static inline auto AsValue = false;
 }
 
 #include <Builtins/Dictionary.h>
