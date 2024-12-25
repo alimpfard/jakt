@@ -442,9 +442,9 @@ ByteString output = ByteString::from_utf8_without_validation(""sv);
 Jakt::utility::Span const span = token.span();
 Jakt::lexer::Token local_token = token;
 while (!(local_token.__jakt_init_index() == 10 /* RCurly */)){
-Jakt::lexer::Token __jakt_tmp284 = local_token;
-if (__jakt_tmp284.__jakt_init_index() == 3 /* Identifier */){
-ByteString const name = __jakt_tmp284.as.Identifier.name;
+Jakt::lexer::Token __jakt_tmp287 = local_token;
+if (__jakt_tmp287.__jakt_init_index() == 3 /* Identifier */){
+ByteString const name = __jakt_tmp287.as.Identifier.name;
 collection.push(name);
 }
 local_token = this->consume();

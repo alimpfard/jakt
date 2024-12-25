@@ -66,6 +66,17 @@ constexpr T to_degrees(T radians)
     return radians * 180 / AK::Pi<T>;
 }
 
+template<FloatingPoint FloatT>
+FloatT copysign(FloatT x, FloatT y)
+{
+    using Extractor = FloatExtractor<FloatT>;
+    Extractor ex, ey;
+    ex.d = x;
+    ey.d = y;
+    ex.sign = ey.sign;
+    return ex.d;
+}
+
 #define CONSTEXPR_STATE(function, args...)        \
     if (is_constant_evaluated()) {                \
         if (IsSame<T, long double>)               \
@@ -404,37 +415,99 @@ constexpr T fmod(T x, T y)
             : "u"(y));
     } while (fpu_status & 0x400);
     return x;
-    // FIXME: Add a generic implementation of this
-    //        Neither
-    //        ```
-    //        return x - (y * trunc(x/y))
-    //        ```
-    //        nor
-    //        ```
-    //        double result = remainder(std::fabs(x), y = std::fabs(y));
-    //        if (std::signbit(result))
-    //            result += y;
-    //        return std::copysign(result, x);
-    //        ``` from (https://en.cppreference.com/w/cpp/numeric/math/fmod)
-    //        provide enough precision for all cases
-    //        other implementations seem to do this by hand with some fixed point steps in between
-    //        For `remainder` the trivial solution of
-    //        ```
-    //        return x - (y * rint(x/y))
-    //        ```
-    //        might work
-
 #else
 #    if defined(AK_OS_SERENITY)
-    // TODO: Add implementation for this function.
-    TODO();
-#    endif
+    // FIXME: This is a very naive implementation.
+
+    if (__builtin_isnan(x))
+        return x;
+    if (__builtin_isnan(y))
+        return y;
+
+    // SPECIAL VALUES
+    //      fmod(±0, y) returns ±0 if y is neither 0 nor NaN.
+    if (x == 0 && y != 0)
+        return x;
+
+    //      fmod(x, y) returns a NaN and raises the "invalid" floating-point exception for x infinite or y zero.
+    // FIXME: Exception.
+    if (__builtin_isinf(x) || y == 0)
+        return NaN<T>;
+
+    //      fmod(x, ±infinity) returns x for x not infinite.
+    if (__builtin_isinf(y))
+        return x;
+
+    // Range reduction: handle negative x and y.
+    if (y < 0)
+        return fmod(x, -y);
+    if (x < 0)
+        return -fmod(-x, y);
+
+    // x is x_mantissa * 2**x_exponent, y is y_mantissa * 2**y_exponent.
+    // (Both are positive at this point.)
+    // If y_exponent > x_exponent, we are done and can return x.
+    // If y_exponent == x_exponent, we can return (x_mantissa % y_mantissa) * 2**x_exponent.
+    // If y_exponent < x_exponent, we'll iteratively reduce x_exponent by shifting from
+    // the exponent into the mantissa.
+
+    FloatExtractor<T> x_bits { .d = x };
+    typename FloatExtractor<T>::ComponentType x_exponent = x_bits.exponent; // - FloatExtractor<T>::exponent_bias;
+
+    FloatExtractor<T> y_bits { .d = y };
+    typename FloatExtractor<T>::ComponentType y_exponent = y_bits.exponent; // - FloatExtractor<T>::exponent_bias;
+
+    // FIXME: Handle denormals. For now, treat them as 0.
+    if (x_exponent == 0 && y_exponent != 0)
+        return 0;
+    if (y_exponent == 0)
+        return NaN<T>;
+
+    if (y_exponent > x_exponent)
+        return x;
+
+    // FIXME: This is wrong for f80.
+    typename FloatExtractor<T>::ComponentType implicit_mantissa_bit = 1;
+    implicit_mantissa_bit <<= FloatExtractor<T>::mantissa_bits;
+
+    typename FloatExtractor<T>::ComponentType x_mantissa = x_bits.mantissa | implicit_mantissa_bit;
+    typename FloatExtractor<T>::ComponentType y_mantissa = y_bits.mantissa | implicit_mantissa_bit;
+
+    while (y_exponent < x_exponent) {
+        // This is ok because (x % (y * 2**n)) divides (x % y) for all n > 0.
+        x_mantissa %= y_mantissa;
+
+        x_mantissa <<= 1;
+        --x_exponent;
+    }
+
+    x_mantissa %= y_mantissa;
+
+    // We're done and want to return x_mantissa * 2 ** x_exponent.
+    // But x_mantissa might not have a leading 1 bit, so we have to realign first.
+    // Mantissa is mantissa_bits long, count_leading_zeroes() counts in ComponentType, adjust:
+    auto const always_zero_bits = sizeof(typename FloatExtractor<T>::ComponentType) * 8 - (FloatExtractor<T>::mantissa_bits + 1); // +1 for implicit 1 bit
+    auto shift = count_leading_zeroes(x_mantissa) - always_zero_bits;
+
+    if (x_exponent < shift) {
+        // FIXME: Make a real denormal.
+        return 0;
+    }
+
+    x_mantissa <<= shift;
+    x_exponent -= shift;
+
+    x_bits.exponent = x_exponent;
+    x_bits.mantissa = x_mantissa;
+    return x_bits.d;
+#    else
     if constexpr (IsSame<T, long double>)
         return __builtin_fmodl(x, y);
     if constexpr (IsSame<T, double>)
         return __builtin_fmod(x, y);
     if constexpr (IsSame<T, float>)
         return __builtin_fmodf(x, y);
+#    endif
 #endif
 }
 
@@ -565,9 +638,20 @@ constexpr T sin(T angle)
     return ret;
 #else
 #    if defined(AK_OS_SERENITY)
-    // FIXME: This is a very naive implementation, and is only valid for small x.
-    //        Probably a good idea to use a better algorithm in the future, such as a taylor approximation.
-    return angle;
+    if (angle < 0)
+        return -sin(-angle);
+
+    angle = fmod(angle, 2 * Pi<T>);
+
+    if (angle >= Pi<T>)
+        return -sin(angle - Pi<T>);
+
+    if (angle > Pi<T> / 2)
+        return sin(Pi<T> - angle);
+
+    // https://en.wikipedia.org/wiki/Bh%C4%81skara_I%27s_sine_approximation_formula
+    // FIXME: This is not a good formula! It requires divisions, so it's slow, and it's not very accurate either.
+    return 16 * angle * (Pi<T> - angle) / (5 * Pi<T> * Pi<T> - 4 * angle * (Pi<T> - angle));
 #    else
     return __builtin_sin(angle);
 #    endif
@@ -588,9 +672,20 @@ constexpr T cos(T angle)
     return ret;
 #else
 #    if defined(AK_OS_SERENITY)
-    // FIXME: This is a very naive implementation, and is only valid for small x.
-    //        Probably a good idea to use a better algorithm in the future, such as a taylor approximation.
-    return 1 - ((angle * angle) / 2);
+    if (angle < 0)
+        return cos(-angle);
+
+    angle = fmod(angle, 2 * Pi<T>);
+
+    if (angle >= Pi<T>)
+        return -cos(angle - Pi<T>);
+
+    if (angle > Pi<T> / 2)
+        return -cos(Pi<T> - angle);
+
+    // https://en.wikipedia.org/wiki/Bh%C4%81skara_I%27s_sine_approximation_formula
+    // FIXME: This is not a good formula! It requires divisions, so it's slow, and it's not very accurate either.
+    return (Pi<T> * Pi<T> - 4 * angle * angle) / (Pi<T> * Pi<T> + angle * angle);
 #    else
     return __builtin_cos(angle);
 #    endif
@@ -714,10 +809,68 @@ constexpr T atan2(T y, T x)
     return ret;
 #else
 #    if defined(AK_OS_SERENITY)
-    // TODO: Add implementation for this function.
-    TODO();
-#    endif
+    if (__builtin_isnan(y))
+        return y;
+    if (__builtin_isnan(x))
+        return x;
+
+    // SPECIAL VALUES
+    //      atan2(±0, -0) returns ±pi.
+    if (y == 0 && x == 0 && signbit(x))
+        return copysign(Pi<T>, y);
+
+    //      atan2(±0, +0) returns ±0.
+    if (y == 0 && x == 0 && !signbit(x))
+        return y;
+
+    //      atan2(±0, x) returns ±pi for x < 0.
+    if (y == 0 && x < 0)
+        return copysign(Pi<T>, y);
+
+    //      atan2(±0, x) returns ±0 for x > 0.
+    if (y == 0 && x > 0)
+        return y;
+
+    //      atan2(y, ±0) returns +pi/2 for y > 0.
+    if (y > 0 && x == 0)
+        return Pi<T> / 2;
+
+    //      atan2(y, ±0) returns -pi/2 for y < 0.
+    if (y < 0 && x == 0)
+        return -Pi<T> / 2;
+
+    //      atan2(±y, -infinity) returns ±pi for finite y > 0.
+    if (!__builtin_isinf(y) && y > 0 && __builtin_isinf(x) && signbit(x))
+        return copysign(Pi<T>, y);
+
+    //      atan2(±y, +infinity) returns ±0 for finite y > 0.
+    if (!__builtin_isinf(y) && y > 0 && __builtin_isinf(x) && !signbit(x))
+        return copysign(static_cast<T>(0), y);
+
+    //      atan2(±infinity, x) returns ±pi/2 for finite x.
+    if (__builtin_isinf(y) && !__builtin_isinf(x))
+        return copysign(Pi<T> / 2, y);
+
+    //      atan2(±infinity, -infinity) returns ±3*pi/4.
+    if (__builtin_isinf(y) && __builtin_isinf(x) && signbit(x))
+        return copysign(3 * Pi<T> / 4, y);
+
+    //      atan2(±infinity, +infinity) returns ±pi/4.
+    if (__builtin_isinf(y) && __builtin_isinf(x) && !signbit(x))
+        return copysign(Pi<T> / 4, y);
+
+    // Check quadrant, going counterclockwise.
+    if (y > 0 && x > 0)
+        return atan(y / x);
+    if (y > 0 && x < 0)
+        return atan(y / x) + Pi<T>;
+    if (y < 0 && x < 0)
+        return atan(y / x) - Pi<T>;
+    // y < 0 && x > 0
+    return atan(y / x);
+#    else
     return __builtin_atan2(y, x);
+#    endif
 #endif
 }
 
@@ -862,6 +1015,67 @@ constexpr T log10(T x)
 }
 
 template<FloatingPoint T>
+constexpr T exp2(T exponent)
+{
+    CONSTEXPR_STATE(exp2, exponent);
+
+#if ARCH(X86_64)
+    T res;
+    asm("fld1\n"
+        "fld %%st(1)\n"
+        "fprem\n"
+        "f2xm1\n"
+        "faddp\n"
+        "fscale\n"
+        "fstp %%st(1)"
+        : "=t"(res)
+        : "0"(exponent));
+    return res;
+#else
+    // TODO: Add better implementation of this function.
+    // This is just fast exponentiation for the integer part and
+    // the first couple terms of the taylor series for the fractional part.
+
+    if (exponent < 0)
+        return 1 / exp2(-exponent);
+
+    if (exponent >= log2(NumericLimits<T>::max()))
+        return Infinity<T>;
+
+    // Integer exponentiation part.
+    int int_exponent = static_cast<int>(exponent);
+    T exponent_fraction = exponent - int_exponent;
+
+    T int_result = 1;
+    T base = 2;
+    for (;;) {
+        if (int_exponent & 1)
+            int_result *= base;
+        int_exponent >>= 1;
+        if (!int_exponent)
+            break;
+        base *= base;
+    }
+
+    // Fractional part.
+    // Uses:
+    // exp(x) = sum(n, 0, \infty, x ** n / n!)
+    // 2**x = exp(log2(e) * x)
+    // FIXME: Pick better step size (and make it dependent on T).
+    T result = 0;
+    T power = 1;
+    T factorial = 1;
+    for (int i = 1; i < 16; ++i) {
+        result += power / factorial;
+        power *= exponent_fraction / L2_E<T>;
+        factorial *= i;
+    }
+
+    return int_result * result;
+#endif
+}
+
+template<FloatingPoint T>
 constexpr T exp(T exponent)
 {
     CONSTEXPR_STATE(exp, exponent);
@@ -881,37 +1095,8 @@ constexpr T exp(T exponent)
         : "0"(exponent));
     return res;
 #else
-#    if defined(AK_OS_SERENITY)
-    // TODO: Add implementation for this function.
-    TODO();
-#    endif
-    return __builtin_exp(exponent);
-#endif
-}
-
-template<FloatingPoint T>
-constexpr T exp2(T exponent)
-{
-    CONSTEXPR_STATE(exp2, exponent);
-
-#if ARCH(X86_64)
-    T res;
-    asm("fld1\n"
-        "fld %%st(1)\n"
-        "fprem\n"
-        "f2xm1\n"
-        "faddp\n"
-        "fscale\n"
-        "fstp %%st(1)"
-        : "=t"(res)
-        : "0"(exponent));
-    return res;
-#else
-#    if defined(AK_OS_SERENITY)
-    // TODO: Add implementation for this function.
-    TODO();
-#    endif
-    return __builtin_exp2(exponent);
+    // TODO: Add better implementation of this function.
+    return exp2(exponent * L2_E<T>);
 #endif
 }
 

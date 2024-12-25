@@ -82,6 +82,10 @@
 #    define CSS_TRANSITIONS_DEBUG 0
 #endif
 
+#ifndef DEVICETREE_DEBUG
+#    define DEVICETREE_DEBUG 0
+#endif
+
 #ifndef DDS_DEBUG
 #    define DDS_DEBUG 0
 #endif

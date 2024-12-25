@@ -2,6 +2,7 @@
 extern "C" __cdecl int SetConsoleOutputCP(unsigned int code_page);
 #endif
 #include "parser.h"
+#include "jakt__prelude__hash.h"
 #include "jakt__prelude__static_array.h"
 namespace Jakt {
 namespace parser {
@@ -1040,6 +1041,16 @@ builder.append(")"sv);return builder.to_string(); }
 bool Jakt::parser::CheckedQualifiers::equals(Jakt::parser::CheckedQualifiers const other) const {
 {
 return this->is_immutable == other.is_immutable;
+}
+}
+
+u32 Jakt::parser::CheckedQualifiers::hash() const {
+{
+return [](bool const& self) -> u32 {{
+return AK::Traits<bool>().hash(self);
+}
+}
+(this->is_immutable);
 }
 }
 
