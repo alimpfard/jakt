@@ -64,6 +64,7 @@ fn help() -> String {
     output += "  -B,--binary-dir PATH\t\t\tOutput directory for compiled files.\n\t\t\t\t\tDefaults to $PWD/build.\n"
     output += "  -E,--exports-dir PATH\t\t\tOutput directory for exported files, relative to $PWD.\n\t\t\t\t\tDefaults to '$PWD/exports'.\n"
     output += "  -I PATH\t\t\t\tAdd PATH to compiler's include list. Can be specified multiple times.\n"
+    output += "  --sysroot PATH\t\t\tSpecify the sysroot used for the build.\n"
     output += "  -J,--jobs NUMBER\t\t\tSpecify the number of jobs to run in parallel, defaults to 2 (1 on windows).\n"
     output += "  -L PATH\t\t\t\tAdd PATH to linker's search list. Can be specified multiple times.\n"
     output += "  -l,--link-with LIB\t\t\tLink executable with LIB. Can be specified multiple times.\n"
@@ -103,7 +104,6 @@ fn help() -> String {
     output += "All other given options and flags will be passed to the compiler invocation verbatim.\n"
     output += "  --source-file PATH\t\t\tSpecify the path to the source file to compile.\n"
     output += "  -T,--target-triple TARGET\t\tSpecify the target triple used for the build, defaults to native.\n"
-    output += "  --sysroot PATH\t\t\tSpecify the sysroot used for the build.\n"
     output += "  --system-include-dir PATH\t\tSpecify a system include directory to use.\n"
     output += "  --system-lib-dir PATH\t\t\tSpecify a system library directory to use.\n"
     output += "  --compiler-include-dir PATH\t\tSpecify a compiler include directory to use.\n"
@@ -255,7 +255,11 @@ fn selfhost_crosscompiler_main(args: [String]) throws -> c_int {
         let arg = args_to_process.dequeue()
         match arg {
             "--target-triple" | "-T" => { target_triple = args_to_process.dequeue() }
-            "--sysroot" => { sysroot = args_to_process.dequeue() }
+            "--sysroot" => {
+                sysroot = args_to_process.dequeue()
+                compiler_args.push("--sysroot")
+                compiler_args.push(sysroot!)
+            }
             "--system-lib-dir" => {
                 system_lib_dirs.push(args_to_process.dequeue())
             }
@@ -324,11 +328,6 @@ fn selfhost_crosscompiler_main(args: [String]) throws -> c_int {
         mut args = compiler_args[..].to_array()
         args.push("--target-triple")
         args.push(format("{}-unknown", abbreviated_triple))
-
-        if sysroot.has_value() {
-            args.push("--extra-cpp-flag")
-            args.push(format("--sysroot={}", sysroot!))
-        }
 
         if compiler_include_dir.has_value() {
             args.push("-I")
@@ -523,6 +522,7 @@ fn compiler_main(anon args: [String]) throws -> c_int {
     let archive_link_support_libs = args_parser.flag(["--archive-link-support-libs"])
     let build_static = args_parser.flag(["--static"])
     let extra_include_paths = args_parser.option_multiple(["-I"])
+    let sysroot = args_parser.option(["--sysroot"])
     let extra_lib_paths = args_parser.option_multiple(["-L"])
     let extra_link_libs = args_parser.option_multiple(["-l"])
     let extra_linker_args = args_parser.option_multiple(["-Wl"])
@@ -1045,6 +1045,11 @@ fn compiler_main(anon args: [String]) throws -> c_int {
 
         for flag in extra_cpp_flags {
             extra_compiler_flags.push(flag)
+        }
+
+        if sysroot is Some(value) {
+            extra_compiler_flags.push("--sysroot")
+            extra_compiler_flags.push(value)
         }
 
         try builder.build_all(

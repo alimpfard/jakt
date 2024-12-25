@@ -2478,7 +2478,29 @@ class CppImportProcessor {
             system_includes.push(arg.substring(start, length: arg.length() - start))
         }
 
-        mut args_storage = [""; 3 + includes.size() + system_includes.size() + defines.size()]
+        mut sysroot: String? = None
+        mut next_arg_is_sysroot = false
+        for arg in program.compiler.extra_cpp_flags {
+            if next_arg_is_sysroot {
+                sysroot = arg
+                next_arg_is_sysroot = false
+                continue
+            }
+            guard arg.starts_with("--sysroot") else { continue }
+            if arg == "--sysroot" {
+                next_arg_is_sysroot = true
+                continue
+            }
+            let start = match arg.starts_with("--sysroot=") {
+                true => 10uz
+                false => 9uz
+            }
+            sysroot = arg.substring(start, length: arg.length() - start)
+        }
+
+        let sysroot_offset : usize = match sysroot.has_value() { true => 1, false => 0 }
+
+        mut args_storage = [""; 3 + sysroot_offset + includes.size() + 3 * system_includes.size() + defines.size()]
         if is_c {
             args_storage[0] = "-xc"
             args_storage[1] = "-std=c11"
@@ -2487,15 +2509,24 @@ class CppImportProcessor {
             args_storage[1] = "-std=c++23"
         }
         args_storage[2] = format("--target={}", program.compiler.target_triple ?? Target::active().name())
+        mut arg_offset = 3uz
 
-        mut arg_offset = 3
+        if sysroot is Some(value) {
+            args_storage[arg_offset] = format("--sysroot={}", value)
+            arg_offset += 1
+        }
+
         for include in includes {
             args_storage[arg_offset] = format("-I{}", include)
             arg_offset += 1
         }
 
         for include in system_includes {
-            args_storage[arg_offset] = format("-isystem{}", include)
+            args_storage[arg_offset] = format("-I{}", include)
+            arg_offset += 1
+            args_storage[arg_offset] = "--system-header-prefix"
+            arg_offset += 1
+            args_storage[arg_offset] = format("{}", include)
             arg_offset += 1
         }
 
