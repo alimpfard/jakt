@@ -20,17 +20,17 @@ import cpp_import::clang_c {
     CXTranslationUnit, CXTranslationUnit_Flags, CXType, CXTypeKind, CXUnsavedFile, CXToken, CXTokenKind
 }
 import cpp_import::clang_c {
-    clang_CXXMethod_isConst, clang_CXXMethod_isPureVirtual, clang_CXXMethod_isStatic, clang_CXXMethod_isVirtual
-    clang_Cursor_Evaluate, clang_Cursor_getNumTemplateArguments, clang_Cursor_getTemplateArgumentType
-    clang_Cursor_getTranslationUnit, clang_Cursor_isMacroFunctionLike, clang_Cursor_isNull, clang_EvalResult_dispose
-    clang_EvalResult_getAsDouble, clang_EvalResult_getAsInt, clang_EvalResult_getAsLongLong
-    clang_EvalResult_getAsStr, clang_EvalResult_getAsUnsigned, clang_EvalResult_getKind
-    clang_EvalResult_isUnsignedInt, clang_Type_getNamedType, clang_Type_getNumTemplateArguments
-    clang_Type_getSizeOf, clang_Type_getTemplateArgumentAsType, clang_createIndex, clang_disposeIndex
-    clang_disposeString, clang_disposeTokens, clang_disposeTranslationUnit, clang_equalCursors, clang_getArgType
-    clang_getArrayElementType, clang_getArraySize, clang_getCString, clang_getCanonicalCursor
-    clang_getCanonicalType, clang_getCursorDefinition, clang_getCursorExtent, clang_getCursorKind
-    clang_getCursorKindSpelling, clang_getCursorLocation, clang_getCursorPrettyPrinted
+    clang_CXXMethod_isConst, clang_CXXMethod_isDeleted, clang_CXXMethod_isPureVirtual, clang_CXXMethod_isStatic
+    clang_CXXMethod_isVirtual, clang_Cursor_Evaluate, clang_Cursor_getNumTemplateArguments
+    clang_Cursor_getTemplateArgumentType, clang_Cursor_getTranslationUnit, clang_Cursor_isMacroFunctionLike
+    clang_Cursor_isNull, clang_EvalResult_dispose, clang_EvalResult_getAsDouble, clang_EvalResult_getAsInt
+    clang_EvalResult_getAsLongLong, clang_EvalResult_getAsStr, clang_EvalResult_getAsUnsigned
+    clang_EvalResult_getKind, clang_EvalResult_isUnsignedInt, clang_Type_getNamedType
+    clang_Type_getNumTemplateArguments, clang_Type_getSizeOf, clang_Type_getTemplateArgumentAsType
+    clang_createIndex, clang_disposeIndex, clang_disposeString, clang_disposeTokens, clang_disposeTranslationUnit
+    clang_equalCursors, clang_getArgType, clang_getArrayElementType, clang_getArraySize, clang_getCString
+    clang_getCanonicalCursor, clang_getCanonicalType, clang_getCursorDefinition, clang_getCursorExtent
+    clang_getCursorKind, clang_getCursorKindSpelling, clang_getCursorLocation, clang_getCursorPrettyPrinted
     clang_getCursorPrintingPolicy, clang_getCursorResultType, clang_getCursorSemanticParent, clang_getCursorSpelling
     clang_getCursorType, clang_getCursorUSR, clang_getEnumDeclIntegerType, clang_getFileName, clang_getNumArgTypes
     clang_getPointeeType, clang_getResultType, clang_getSpecializedCursorTemplate, clang_getSpellingLocation
@@ -1636,6 +1636,10 @@ class CppImportProcessor {
             CXCursor_CXXMethod => true
             CXCursor_FunctionTemplate => this_type.has_value()
             else => false
+        }
+
+        if (is_method or kind is Constructor) and clang_CXXMethod_isDeleted(cursor) {
+            return
         }
 
         let is_declared_as_static = kind is Constructor or kind is Destructor or (

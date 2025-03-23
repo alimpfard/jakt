@@ -519,6 +519,7 @@ import extern c "clang-c/Index.h" {
     extern fn clang_CXXMethod_isVirtual(anon cursor: CXCursor) -> bool
     extern fn clang_CXXMethod_isPureVirtual(anon cursor: CXCursor) -> bool
     extern fn clang_CXXMethod_isConst(anon cursor: CXCursor) -> bool
+    extern fn clang_CXXMethod_isDeleted(anon cursor: CXCursor) -> bool
     extern fn clang_getNumArgTypes(anon type: CXType) -> c_int
     extern fn clang_getArgType(anon type: CXType, anon i: c_int) -> CXType
     extern fn clang_getResultType(anon type: CXType) -> CXType
