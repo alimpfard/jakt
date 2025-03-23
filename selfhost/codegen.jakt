@@ -1131,6 +1131,10 @@ struct CodeGenerator {
                         .codegen_struct(struct_: .program.get_struct(struct_id), output: &mut inside_namespace)
                     }
                     Trait => { }
+                    GenericInstance | GenericEnumInstance | Dependent | TypeVariable => {
+                        // We don't need to generate these types, as they are
+                        // only used for specialization.
+                    }
                     else => {
                         panic(format("Unexpected type in dependency graph: {}", type_))
                     }
@@ -5176,7 +5180,8 @@ struct CodeGenerator {
                 panic("Generic trait instance in codegen")
             }
             else => {
-                panic(format("Invalid type in codegen_type({})", .program.type_name(type_id, debug_mode: true)))
+                // panic(format("Invalid type in codegen_type({})", .program.type_name(type_id, debug_mode: true)))
+                yield "int"
             }
         } + qualifiers
     }
