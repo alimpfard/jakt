@@ -1819,7 +1819,7 @@ struct CodeGenerator {
         output: &mut StringBuilder
     ) throws {
         if enum_.underlying_type_id != void_type_id() {
-            if .program.is_integer(enum_.underlying_type_id) {
+            if .program.is_integer(enum_.underlying_type_id) or enum_.underlying_type_id == builtin(BuiltinType::Bool) {
                 output.appendff("enum class {}: {};", enum_.name, .codegen_type(enum_.underlying_type_id))
                 return
             } else {
@@ -1839,20 +1839,29 @@ struct CodeGenerator {
 
     fn codegen_enum(mut this, enum_: CheckedEnum, output: &mut StringBuilder) throws {
         if enum_.underlying_type_id != void_type_id() {
-            if .program.is_integer(enum_.underlying_type_id) {
+            if .program.is_integer(enum_.underlying_type_id) or enum_.underlying_type_id == builtin(BuiltinType::Bool) {
                 output.appendff("enum class {} : {} {{\n", enum_.name, .codegen_type(enum_.underlying_type_id))
                 for variant in enum_.variants {
-                    guard variant is WithValue(name, expr) else {
-                        todo(format("codegen_enum can't generate variant: {}", variant))
+                    match variant {
+                        Untyped(name) => {
+                            output.append(name)
+                            output.append(",\n")
+                        }
+                        WithValue(name, expr) => {
+                            output.append(name)
+                            output.append(" = ")
+                            .codegen_expression(expr, &mut output)
+                            output.append(",\n")
+                        }
+                        else => {
+                            todo(format("codegen_enum can't generate variant: {}", variant))
+                        }
                     }
-                    output.append(name)
-                    output.append(" = ")
-                    .codegen_expression(expr, &mut output)
-                    output.append(",\n")
                 }
                 output.append("};\n")
                 return
             } else {
+                eprintln("Enums with a non-integer underlying type: {} : {}", enum_.name, .program.type_name(enum_.underlying_type_id))
                 todo("Enums with a non-integer underlying type")
             }
         }
