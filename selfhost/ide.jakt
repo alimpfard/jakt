@@ -231,6 +231,7 @@ fn find_type_definition_for_type_id(program: CheckedProgram, type_id: TypeId, sp
         Self => span
         Dependent => span
         Const(value) => value.span
+        DeferredConst(expr) => expr.span()
         GenericInstance(id: struct_id, args) => {
             mut output = span
             if struct_id.equals(array_struct_id) or struct_id.equals(optional_struct_id) or struct_id.equals(range_struct_id) or struct_id.equals(set_struct_id) or struct_id.equals(tuple_struct_id) or struct_id.equals(weak_ptr_struct_id) {
@@ -1060,7 +1061,8 @@ fn get_type_signature(program: CheckedProgram, type_id: TypeId) throws -> String
         Self => "Self"
         Trait(trait_id) => program.get_trait(trait_id).name
         Dependent(namespace_type, name) => format("{}::{}", program.type_name(namespace_type), name)
-        Const(value) => comptime_format_impl(format_string: "const {}", arguments: [value][..], &program)
+        Const(value) => comptime_format_impl(format_string: "comptime {}", arguments: [value][..], &program)
+        DeferredConst(expr) => format("comptime ({})", expr)
         Function(params, return_type_id) => {
             mut param_names: [String] = []
             for x in params {

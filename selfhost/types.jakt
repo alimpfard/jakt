@@ -288,6 +288,7 @@ boxed enum Type {
     Function(params: [TypeId], can_throw: bool, return_type_id: TypeId, pseudo_function_id: FunctionId)
     Self
     Const(Value)
+    DeferredConst(CheckedExpression)
 
     fn hash(this) -> u32 => match this {
         Void => 0
@@ -348,6 +349,7 @@ boxed enum Type {
         }
         Self => 30
         Const => 31
+        DeferredConst => 32
     }
 
     fn generic_parameters(this, program: CheckedProgram) -> [CheckedGenericParameter]? => match this {
@@ -364,7 +366,7 @@ boxed enum Type {
     }
 
     fn is_concrete(this) -> bool => match this {
-        TypeVariable | Self | Dependent | Trait | GenericTraitInstance | Unknown => false
+        TypeVariable | Self | Dependent | Trait | GenericTraitInstance | DeferredConst | Unknown => false
         else => true
     }
 
@@ -439,6 +441,7 @@ boxed enum Type {
         Function => "Function"
         Self => "Self"
         Const => "Const"
+        DeferredConst => "DeferredConst"
     }
 
     fn equals(this, anon rhs: Type) -> bool => rhs.qualifiers == .qualifiers and match this {
@@ -598,6 +601,7 @@ boxed enum Type {
 
             return true
         }
+        DeferredConst => false // TODO.
     }
 
     fn is_builtin(this) -> bool => match this {
@@ -2130,6 +2134,7 @@ class CheckedProgram {
             )
             Self => Type::Self(qualifiers)
             Const(value) => Type::Const(qualifiers, value)
+            DeferredConst(expr) => Type::DeferredConst(qualifiers, expr)
         }
         module_id: type_id.module
         only_in_current_module: true)
@@ -3047,6 +3052,7 @@ class CheckedProgram {
             Reference(type_id) => format("&{}", .type_name(type_id, debug_mode))
             MutableReference(type_id) => format("&mut {}", .type_name(type_id, debug_mode))
             Const(value) => comptime_format_impl(format_string: "comptime {}", arguments: [value][..], program: &this)
+            DeferredConst(expr) => format("comptime ({})", expr) // TODO.
         }
     }
 
@@ -3140,6 +3146,18 @@ class CheckedProgram {
                 let replacement_type_id = generic_inferences.get(type_id)
                 if replacement_type_id.has_value() {
                     return replacement_type_id!
+                }
+            }
+            DeferredConst(expr) => {
+                // A DeferredConst holds a checked expression that couldn't be evaluated at definition time.
+                // During substitution, try to resolve it by looking up the type variable it references.
+                if expr is Var(var) {
+                    // Look through the generic inferences for a TypeVariable matching this var name
+                    for entry in generic_inferences.values {
+                        if .get_type(entry.0) is TypeVariable(name) and name == var.name {
+                            return entry.1
+                        }
+                    }
                 }
             }
             Dependent(namespace_type, name, args) => {

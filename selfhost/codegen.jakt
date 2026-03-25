@@ -234,6 +234,11 @@ struct CodeGenerator {
     comptime_tag_enums: [TypeId: [TypeId]] = [:]
     comptime_param_tag_names: [TypeId: String] = [:]
     comptime_tags_emitted: bool = false
+    deferred_const_params: [TypeId: String] = [:]
+    // base_scope_id to (info, base return_type_id, base param type_ids)
+    deferred_const_function_info: [ScopeId: ([(TypeId, TypeId)], TypeId, [TypeId])] = [:]
+    // function scope id to resolved Const TypeIds
+    deferred_const_values: [ScopeId: [TypeId]] = [:]
 
     // `forward_error_with_try` controls whether errors are handled through the TRY() macro or through an external mechanism put by the caller.
     // noreturn functions may not throw, so let them crash instead.
@@ -307,6 +312,10 @@ struct CodeGenerator {
 
     fn add_comptime_tag(mut this, const_type_id: TypeId, value: Value) throws {
         let value_type_id = value.impl.type_id(&mut .program)
+        let value_type = .program.get_type(value_type_id)
+        if value_type.is_numeric() or value_type is Bool {
+            return
+        }
         if not .comptime_tag_enums.contains(value_type_id) {
             .comptime_tag_enums.set(value_type_id, [const_type_id])
         } else {
@@ -334,9 +343,63 @@ struct CodeGenerator {
     fn record_param_tag_name(mut this, param_type_id: TypeId, value: Value) throws {
         if not .comptime_param_tag_names.contains(param_type_id) {
             let value_type_id = value.impl.type_id(&mut .program)
+            let value_type = .program.get_type(value_type_id)
+            if value_type.is_numeric() or value_type is Bool {
+                return
+            }
             let type_name = .program.type_name(value_type_id)
             let sanitized_name = CodeGenerator::sanitize_cpp_identifier(type_name)
             .comptime_param_tag_names.set(param_type_id, format("__jakt_comptime_{}", sanitized_name))
+        }
+    }
+
+    fn collect_deferred_consts_in_type(this, type_id: TypeId, result: &mut [TypeId]) {
+        match .program.get_type(type_id) {
+            DeferredConst => {
+                mut found = false
+                for existing in result {
+                    if existing.equals(type_id) {
+                        found = true
+                        break
+                    }
+                }
+                if not found {
+                    result.push(type_id)
+                }
+            }
+            GenericInstance(id, args) | GenericEnumInstance(id, args) => {
+                for arg in args {
+                    .collect_deferred_consts_in_type(type_id: arg, result)
+                }
+            }
+            else => {}
+        }
+    }
+
+    fn resolve_deferred_const_values(this, generic_type_id: TypeId, specialized_type_id: TypeId, result: &mut [TypeId: TypeId]) {
+        match .program.get_type(generic_type_id) {
+            DeferredConst => {
+                result.set(generic_type_id, specialized_type_id)
+            }
+            GenericInstance(id, args) => {
+                if .program.get_type(specialized_type_id) is GenericInstance(args: spec_args) {
+                    for i in 0..args.size() {
+                        if i < spec_args.size() {
+                            .resolve_deferred_const_values(generic_type_id: args[i], specialized_type_id: spec_args[i], result)
+                        }
+                    }
+                }
+            }
+            GenericEnumInstance(id, args) => {
+                if .program.get_type(specialized_type_id) is GenericEnumInstance(args: spec_args) {
+                    for i in 0..args.size() {
+                        if i < spec_args.size() {
+                            .resolve_deferred_const_values(generic_type_id: args[i], specialized_type_id: spec_args[i], result)
+                        }
+                    }
+                }
+            }
+            else => {}
         }
     }
 
@@ -393,6 +456,85 @@ struct CodeGenerator {
                 }
             }
         }
+
+        // Pass 1: collect DeferredConst info from base (non-specialized) functions
+        mut deferred_counter: usize = 0
+        for module in .program.modules {
+            for function in module.functions {
+                if function.specialization_index.has_value() {
+                    continue
+                }
+                if function.generics.params.is_empty() {
+                    continue
+                }
+
+                mut deferred_consts: [TypeId] = []
+                .collect_deferred_consts_in_type(type_id: function.return_type_id, result: &mut deferred_consts)
+                for param in function.params {
+                    .collect_deferred_consts_in_type(type_id: param.variable.type_id, result: &mut deferred_consts)
+                }
+
+                if deferred_consts.is_empty() {
+                    continue
+                }
+
+                mut info: [(TypeId, TypeId)] = []
+                for dc_type_id in deferred_consts {
+                    let name = format("__jakt_deferred_{}", deferred_counter++)
+                    .deferred_const_params.set(dc_type_id, name)
+                    let result_type_id = match .program.get_type(dc_type_id) {
+                        DeferredConst(expr) => expr.type()
+                        else => dc_type_id
+                    }
+                    info.push((dc_type_id, result_type_id))
+                }
+
+                mut base_param_type_ids: [TypeId] = []
+                for param in function.params {
+                    base_param_type_ids.push(param.variable.type_id)
+                }
+
+                .deferred_const_function_info.set(
+                    function.generics.base_scope_id
+                    (info, function.return_type_id, base_param_type_ids)
+                )
+            }
+        }
+
+        // Pass 2: resolve concrete DeferredConst values for specialized functions
+        for module in .program.modules {
+            for func_idx in 0..module.functions.size() {
+                let function = module.functions[func_idx]
+                if not function.specialization_index.has_value() {
+                    continue
+                }
+
+                guard .deferred_const_function_info.contains(function.generics.base_scope_id) else {
+                    continue
+                }
+
+                let (dc_info, base_return_type_id, base_param_type_ids) = .deferred_const_function_info[function.generics.base_scope_id]
+
+                mut resolved_map: [TypeId: TypeId] = [:]
+                .resolve_deferred_const_values(generic_type_id: base_return_type_id, specialized_type_id: function.return_type_id, result: &mut resolved_map)
+                for i in 0..base_param_type_ids.size() {
+                    if i < function.params.size() {
+                        .resolve_deferred_const_values(generic_type_id: base_param_type_ids[i], specialized_type_id: function.params[i].variable.type_id, result: &mut resolved_map)
+                    }
+                }
+
+                mut resolved_values: [TypeId] = []
+                for (dc_type_id, _) in dc_info {
+                    if resolved_map.contains(dc_type_id) {
+                        resolved_values.push(resolved_map[dc_type_id])
+                    } else {
+                        resolved_values.push(dc_type_id)
+                    }
+                }
+
+                .deferred_const_values.set(function.function_scope_id, resolved_values)
+            }
+        }
     }
 
     fn sanitize_cpp_identifier(anon name: String) -> String {
@@ -443,6 +585,49 @@ struct CodeGenerator {
         }
 
         return None
+    }
+
+    // Emit a Const or DeferredConst type as its actual value, bypassing the tag enum system.
+    // Used when the value is needed as a real C++ NTTP (e.g., struct template args like Array's size).
+    fn codegen_type_as_cpp_value(mut this, type_id: TypeId) throws -> String {
+        return match .program.get_type(type_id) {
+            Const(value) => {
+                mut interpreter = Interpreter::create(
+                    compiler: .compiler
+                    program: .program
+                    typecheck_functions: TypecheckFunctions(
+                        block: fn(
+                            parsed_block: ParsedBlock
+                            parent_scope_id: ScopeId
+                            safety_mode: SafetyMode
+                            yield_type_hint: TypeId?
+                            containing_function_id: FunctionId? = None
+                        ) throws -> CheckedBlock {
+                            panic("Cannot typecheck a const block")
+                        }
+                        register_function: fn(
+                            function: CheckedFunction
+                        ) throws -> FunctionId {
+                            panic("Cannot typecheck a const function")
+                        }
+                    )
+                    spans: []
+                )
+                let expr = value_to_checked_expression(value, interpreter)
+                mut builder = StringBuilder::create()
+                .codegen_expression(expr, output: &mut builder)
+                yield builder.to_string()
+            }
+            DeferredConst(expr) => match .deferred_const_params.get(type_id) {
+                Some(name) => name
+                None => {
+                    mut builder = StringBuilder::create()
+                    .codegen_expression(expr, output: &mut builder)
+                    yield builder.to_string()
+                }
+            }
+            else => .codegen_type(type_id)
+        }
     }
 
     fn generate(compiler: Compiler, anon program: CheckedProgram, debug_info: bool, exported_files: &mut [String:String]) throws -> [String:(String, String)] {
@@ -1143,13 +1328,15 @@ struct CodeGenerator {
                 if i < function.generics.params.size() {
                     let param_type_id = function.generics.params[i].checked_parameter.type_id
                     if not .program.is_trivial_in_cpp(type_id: param_type_id) {
+                        if first {
+                            first = false
+                        } else {
+                            output.append(", ")
+                        }
                         if .get_comptime_tag_for_const(type_id: specialization2[i]) is Some(tag) {
-                            if first {
-                                first = false
-                            } else {
-                                output.append(", ")
-                            }
                             output.appendff("{}::{}", tag.0, tag.1)
+                        } else {
+                            output.append(.codegen_type_as_cpp_value(type_id: specialization2[i]))
                         }
                         continue
                     }
@@ -1160,6 +1347,18 @@ struct CodeGenerator {
                     output.append(", ")
                 }
                 output.append(.codegen_type(specialization2[i]))
+            }
+
+            // Append deferred const values for specialization forward decl
+            if .deferred_const_values.contains(function.function_scope_id) {
+                for val_type_id in .deferred_const_values[function.function_scope_id] {
+                    if not first {
+                        output.append(", ")
+                    } else {
+                        first = false
+                    }
+                    output.append(.codegen_type_as_cpp_value(type_id: val_type_id))
+                }
             }
 
             output.append(">(")
@@ -1654,7 +1853,7 @@ struct CodeGenerator {
             if .program.is_trivial_in_cpp(type_id: param.type_id) {
                 return true
             }
-            if .program.get_type(param.type_id) is TypeVariable(is_value) and is_value and .comptime_param_tag_names.contains(param.type_id) {
+            if .program.get_type(param.type_id) is TypeVariable(is_value) and is_value {
                 return true
             }
         }
@@ -1666,7 +1865,7 @@ struct CodeGenerator {
             if .program.is_trivial_in_cpp(type_id: param.checked_parameter.type_id) {
                 return true
             }
-            if .program.get_type(param.checked_parameter.type_id) is TypeVariable(is_value) and is_value and .comptime_param_tag_names.contains(param.checked_parameter.type_id) {
+            if .program.get_type(param.checked_parameter.type_id) is TypeVariable(is_value) and is_value {
                 return true
             }
         }
@@ -1726,20 +1925,23 @@ struct CodeGenerator {
         mut first = true
         for id in parameters {
             if not .program.is_trivial_in_cpp(type_id: id) {
-                // Check if this is a non-trivial comptime value param with a tag enum
-                if .program.get_type(id) is TypeVariable(is_value) and is_value and .comptime_param_tag_names.contains(id) {
-                    if first {
-                        first = false
-                    } else {
-                        output.append(",")
-                    }
-                    output.append(.comptime_param_tag_names[id])
-                    output.append(" ")
-                    let name = .codegen_type(id)
-                    output.append(name)
-                    names.push(name)
+                guard .program.get_type(id) is TypeVariable(is_value) and is_value else {
                     continue
                 }
+                if first {
+                    first = false
+                } else {
+                    output.append(",")
+                }
+                if .comptime_param_tag_names.contains(id) {
+                    output.append(.comptime_param_tag_names[id])
+                } else {
+                    output.append("auto")
+                }
+                output.append(" ")
+                let name = .codegen_type(id)
+                output.append(name)
+                names.push(name)
                 continue
             }
             if first {
@@ -1747,8 +1949,13 @@ struct CodeGenerator {
             } else {
                 output.append(",")
             }
-            if .program.get_type(id) is TypeVariable(is_value) and is_value {
-                output.append("auto ")
+            if .program.get_type(id) is TypeVariable(is_value, value_type_id) and is_value {
+                if value_type_id.has_value() {
+                    output.append(.codegen_type(value_type_id!))
+                    output.append(" ")
+                } else {
+                    output.append("auto ")
+                }
             } else {
                 output.append("typename ")
             }
@@ -1768,9 +1975,29 @@ struct CodeGenerator {
             mut template_output = StringBuilder::create()
             .codegen_template_parameter_names(function.generics.params, output: &mut template_output)
             let template_params = template_output.to_string()
-            if not template_params.is_empty() {
+
+            mut deferred_params = StringBuilder::create()
+            if .deferred_const_function_info.contains(function.generics.base_scope_id) {
+                let info = .deferred_const_function_info[function.generics.base_scope_id]
+                for (dc_type_id, result_type_id) in info.0 {
+                    if not template_params.is_empty() or not deferred_params.is_empty() {
+                        deferred_params.append(", ")
+                    }
+                    let result_type = .program.get_type(result_type_id)
+                    if result_type.is_numeric() or result_type is Bool {
+                        deferred_params.append(.codegen_type(result_type_id))
+                        deferred_params.append(" ")
+                    } else {
+                        deferred_params.append("auto ")
+                    }
+                    deferred_params.append(.deferred_const_params[dc_type_id])
+                }
+            }
+
+            let combined = template_params + deferred_params.to_string()
+            if not combined.is_empty() {
                 output.append("template <")
-                output.append(template_params)
+                output.append(combined)
                 output.append(">\n")
             }
         }
@@ -5060,6 +5287,8 @@ struct CodeGenerator {
                                 if not .program.is_trivial_in_cpp(type_id: param_type_id) {
                                     if .get_comptime_tag_for_const(type_id: generic_parameters[i]) is Some(tag) {
                                         types.push(format("{}::{}", tag.0, tag.1))
+                                    } else {
+                                        types.push(.codegen_type_as_cpp_value(type_id: generic_parameters[i]))
                                     }
                                     continue
                                 }
@@ -5071,6 +5300,17 @@ struct CodeGenerator {
                             types.push(.codegen_type_possibly_as_namespace(type_id: gen_param, as_namespace: false))
                         }
                     }
+
+                    // Add deferred const values for call sites
+                    if call.function_id.has_value() {
+                        let call_target = .program.get_function(call.function_id!)
+                        if .deferred_const_values.contains(call_target.function_scope_id) {
+                            for val_type_id in .deferred_const_values[call_target.function_scope_id] {
+                                types.push(.codegen_type_as_cpp_value(type_id: val_type_id))
+                            }
+                        }
+                    }
+
                     if not types.is_empty() {
                         output.appendff("<{}>", join(types, separator: ", "))
                     }
@@ -5485,6 +5725,14 @@ struct CodeGenerator {
                 builder.append(")>")
                 yield builder.to_string()
             }
+            DeferredConst(expr) => match .deferred_const_params.get(type_id) {
+                Some(name) => name
+                None => {
+                    mut builder = StringBuilder::create()
+                    .codegen_expression(expr, output: &mut builder)
+                    yield builder.to_string()
+                }
+            }
             GenericTraitInstance => {
                 panic("Generic trait instance in codegen")
             }
@@ -5532,14 +5780,35 @@ struct CodeGenerator {
                 if i < struct_.generic_parameters.size() {
                     let param_type_id = struct_.generic_parameters[i].type_id
                     if not .program.is_trivial_in_cpp(type_id: param_type_id) {
-                        if .get_comptime_tag_for_const(type_id: args[i]) is Some(tag) {
-                            if not first {
-                                output += ","
-                            } else {
-                                first = false
+                        // Check if the arg can be emitted directly
+                        mut can_emit_directly = false
+                        match .program.get_type(args[i]) {
+                            Const(value) => {
+                                let value_type = .program.get_type(value.impl.type_id(program: &mut .program))
+                                can_emit_directly = value_type.is_numeric() or value_type is Bool
                             }
-                            output += format("{}::{}", tag.0, tag.1)
+                            DeferredConst | TypeVariable => {
+                                can_emit_directly = true
+                            }
+                            else => {}
                         }
+                        if not can_emit_directly {
+                            if .get_comptime_tag_for_const(type_id: args[i]) is Some(tag) {
+                                if not first {
+                                    output += ","
+                                } else {
+                                    first = false
+                                }
+                                output += format("{}::{}", tag.0, tag.1)
+                            }
+                            continue
+                        }
+                        if not first {
+                            output += ","
+                        } else {
+                            first = false
+                        }
+                        output += .codegen_type_as_cpp_value(type_id: args[i])
                         continue
                     }
                 }
@@ -5595,14 +5864,35 @@ struct CodeGenerator {
             if i < enum_.generic_parameters.size() {
                 let param_type_id = enum_.generic_parameters[i].type_id
                 if not .program.is_trivial_in_cpp(type_id: param_type_id) {
-                    if .get_comptime_tag_for_const(type_id: args[i]) is Some(tag) {
-                        if not first {
-                            output.append(", ")
-                        } else {
-                            first = false
+                    mut can_emit_directly = false
+                    match .program.get_type(args[i]) {
+                        Const(value) => {
+                            let value_type = .program.get_type(value.impl.type_id(program: &mut .program))
+                            can_emit_directly = value_type.is_numeric() or value_type is Bool
                         }
-                        output.appendff("{}::{}", tag.0, tag.1)
+                        DeferredConst | TypeVariable => {
+                            can_emit_directly = true
+                        }
+                        else => {}
                     }
+                    if not can_emit_directly {
+                        if .get_comptime_tag_for_const(type_id: args[i]) is Some(tag) {
+                            if not first {
+                                output.append(", ")
+                            } else {
+                                first = false
+                            }
+                            output.appendff("{}::{}", tag.0, tag.1)
+                        }
+                        continue
+                    }
+                    // Emit directly as a C++ value, bypassing tag enums
+                    if not first {
+                        output.append(", ")
+                    } else {
+                        first = false
+                    }
+                    output.append(.codegen_type_as_cpp_value(type_id: args[i]))
                     continue
                 }
             }
@@ -6144,13 +6434,15 @@ struct CodeGenerator {
                 if i < function.generics.params.size() {
                     let param_type_id = function.generics.params[i].checked_parameter.type_id
                     if not .program.is_trivial_in_cpp(type_id: param_type_id) {
+                        if first {
+                            first = false
+                        } else {
+                            output.append(", ")
+                        }
                         if .get_comptime_tag_for_const(type_id: instantiation[i]) is Some(tag) {
-                            if not first {
-                                output.append(", ")
-                            } else {
-                                first = false
-                            }
                             output.appendff("{}::{}", tag.0, tag.1)
+                        } else {
+                            output.append(.codegen_type_as_cpp_value(type_id: instantiation[i]))
                         }
                         continue
                     }
@@ -6162,6 +6454,19 @@ struct CodeGenerator {
                 }
                 output.append(.codegen_type(instantiation[i]))
             }
+
+            // Append deferred const values for explicit generic instantiation
+            if .deferred_const_values.contains(function.function_scope_id) {
+                for val_type_id in .deferred_const_values[function.function_scope_id] {
+                    if not first {
+                        output.append(", ")
+                    } else {
+                        first = false
+                    }
+                    output.append(.codegen_type_as_cpp_value(type_id: val_type_id))
+                }
+            }
+
             output.append(">")
         }
 

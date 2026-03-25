@@ -78,6 +78,7 @@ fn align_of_impl(
     CInt => Target::active().int_alignment()
     TypeVariable
     | Const
+    | DeferredConst
     | Dependent
     | GenericTraitInstance => 0
     GenericInstance(id: struct_id, args)
@@ -190,6 +191,7 @@ fn size_of_impl(
     CInt => Target::active().int_size()
     TypeVariable
     | Const
+    | DeferredConst
     | Dependent
     | GenericTraitInstance => 0
 
@@ -838,8 +840,7 @@ class InterpreterScope {
             scope = scope!.parent
         }
 
-        // How did this pass typecheck?
-        .compiler.panic("Could not find binding")
+        throw Error::from_string_literal("Could not find binding")
     }
 
     public fn set(mut this, anon name: String, anon value: Value) throws {
@@ -857,8 +858,7 @@ class InterpreterScope {
             scope = scope!.parent
         }
 
-        // How did this pass typecheck?
-        .compiler.panic("Could not find binding")
+        throw Error::from_string_literal("Could not find binding")
     }
 
     public fn all_bindings(this) -> [String:Value] {
@@ -3553,8 +3553,19 @@ class Interpreter {
             if .program.get_type(param_type_id) is TypeVariable(name, is_value) and is_value {
                 if i < function_to_run.generics.specializations.size() and function_to_run.specialization_index.has_value() {
                     let spec = function_to_run.generics.specializations[function_to_run.specialization_index!]
-                    if i < spec.size() and .program.get_type(spec[i]) is Const(value) {
-                        comptime_bindings[name] = value
+                    if i < spec.size() {
+                        match .program.get_type(spec[i]) {
+                            Const(value) => { comptime_bindings[name] = value }
+                            DeferredConst(expr) => {
+                                let value = .execute_expression(expr, invocation_scope!)
+                                if value is JustValue(v) {
+                                    comptime_bindings[name] = v
+                                } else {
+                                    .error(format("Failed to evaluate comptime generic parameter '{}'", name), call_span)
+                                }
+                            }
+                            else => {}
+                        }
                     }
                 }
             }

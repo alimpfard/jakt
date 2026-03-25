@@ -332,6 +332,32 @@ struct Typechecker {
 
     fn find_comptime_binding_in_scope(this, scope_id: ScopeId, anon name: String) throws -> Value? => .program.find_comptime_binding_in_scope(scope_id, name)
 
+    fn find_comptime_type_variable_in_scope(this, scope_id: ScopeId, anon name: String) throws -> TypeId? {
+        let maybe_type_id = .find_type_in_scope(scope_id, name)
+        guard maybe_type_id.has_value() else { return None }
+        let found_type = .get_type(maybe_type_id!)
+        guard found_type is TypeVariable(is_value, value_type_id) else { return None }
+        guard is_value else { return None }
+        return value_type_id.value_or(unknown_type_id())
+    }
+
+    fn type_contains_deferred_const(this, type_id: TypeId) -> bool {
+        return match .get_type(type_id) {
+            DeferredConst => true
+            GenericInstance(id, args) | GenericEnumInstance(id, args) => {
+                mut found = false
+                for arg in args {
+                    if .type_contains_deferred_const(type_id: arg) {
+                        found = true
+                        break
+                    }
+                }
+                yield found
+            }
+            else => false
+        }
+    }
+
     fn get_root_path(this) -> Path {
         let root_module = .program.get_loaded_module(.root_module_name)
         if root_module.has_value() {
@@ -4875,21 +4901,49 @@ struct Typechecker {
             .add_type_to_scope(scope_id, type_name, type_id, span)
 
             mut scope = .get_scope(scope_id)
-            if is_value and .get_type(type_id) is Const(value) {
-                if value_type_id.has_value() {
-                    let actual_type = value.impl.type_id(&mut .program)
-                    if not actual_type.equals(value_type_id!) {
-                        .error(
-                            format(
-                                "Comptime argument type '{}' does not match expected type '{}'"
-                                .type_name(actual_type, debug_mode: false)
-                                .type_name(value_type_id!, debug_mode: false)
-                            )
-                            span
-                        )
+            if is_value {
+                match .get_type(type_id) {
+                    Const(value) => {
+                        if value_type_id.has_value() {
+                            let actual_type = value.impl.type_id(&mut .program)
+                            if not actual_type.equals(value_type_id!) {
+                                .error(
+                                    format(
+                                        "Comptime argument type '{}' does not match expected type '{}'"
+                                        .type_name(actual_type, debug_mode: false)
+                                        .type_name(value_type_id!, debug_mode: false)
+                                    )
+                                    span
+                                )
+                            }
+                        }
+                        scope.comptime_bindings[type_name] = value
                     }
+                    DeferredConst(expr) => {
+                        if value_type_id.has_value() {
+                            let actual_type = expr.type()
+                            if not actual_type.equals(value_type_id!) {
+                                .error(
+                                    format(
+                                        "Comptime argument type '{}' does not match expected type '{}'"
+                                        .type_name(actual_type, debug_mode: false)
+                                        .type_name(value_type_id!, debug_mode: false)
+                                    )
+                                    span
+                                )
+                            }
+                        }
+                        mut interpreter = .interpreter()
+                        mut interp_scope = InterpreterScope::from_runtime_scope(scope_id, program: .program)
+                        let value = try interpreter.execute_expression(expr, scope: interp_scope)
+                        if value.has_value() and value! is JustValue(resolved_value) {
+                            scope.comptime_bindings[type_name] = resolved_value
+                        } else {
+                            .error("Failed to resolve comptime argument", span)
+                        }
+                    }
+                    else => {}
                 }
-                scope.comptime_bindings[type_name] = value
             }
 
             if dependent_scope_id.has_value() {
@@ -5931,13 +5985,18 @@ struct Typechecker {
                 )
                 mut interpreter = .interpreter()
                 mut scope = InterpreterScope::from_runtime_scope(scope_id, program: .program)
-                let value = try interpreter.execute_expression(expr: checked_expr, scope)
-                if value.has_value() and value! is JustValue(resolved_value) {
+                let value = try interpreter.execute_expression(expr: checked_expr, scope) catch {
+                    // If we can't evaluate it immediately, defer the evaluation to instantiation time.
+                    return .find_or_add_type_id(Type::DeferredConst(checked_expr))
+                }
+                if value is JustValue(resolved_value) {
                     return .find_or_add_type_id(Type::Const(resolved_value))
                 }
-
-                .error("Could not evaluate const expression", expr.span())
-                return .find_or_add_type_id(Type::Unknown)
+                .error(
+                    format("Expected a comptime constant value, but got a value of type ‘{}’", .type_name(checked_expr.type()))
+                    expr.span()
+                )
+                return unknown_type_id()
             }
             Reference(inner) => {
                 let inner_type_id = .typecheck_typename(parsed_type: inner, scope_id, name)
@@ -9271,25 +9330,39 @@ struct Typechecker {
             }
             None => match .find_comptime_binding_in_scope(scope_id, name) {
                 Some(value) => value_to_checked_expression(value, interpreter: .interpreter())
-                None => {
-                    .error(format("Variable '{}' not found", name), span)
-                    mut type_id: TypeId? = None
-                    if type_hint.has_value() {
-                        type_id = type_hint!.type_id
-                    }
-
-                    yield CheckedExpression::Var(
+                None => match .find_comptime_type_variable_in_scope(scope_id, name) {
+                    Some(var_type_id) => CheckedExpression::Var(
                         var: CheckedVariable(
-                            name,
-                            type_id: type_id.value_or(unknown_type_id()),
-                            is_mutable: false,
-                            definition_span: span,
+                            name
+                            type_id: var_type_id
+                            is_mutable: false
+                            definition_span: span
                             type_span: None
                             visibility: CheckedVisibility::Public
                             invisible_to_ide: false
-                        ),
+                        )
                         span
                     )
+                    None => {
+                        .error(format("Variable '{}' not found", name), span)
+                        mut type_id: TypeId? = None
+                        if type_hint.has_value() {
+                            type_id = type_hint!.type_id
+                        }
+
+                        yield CheckedExpression::Var(
+                            var: CheckedVariable(
+                                name,
+                                type_id: type_id.value_or(unknown_type_id()),
+                                is_mutable: false,
+                                definition_span: span,
+                                type_span: None
+                                visibility: CheckedVisibility::Public
+                                invisible_to_ide: false
+                            ),
+                            span
+                        )
+                    }
                 }
             }
         }
@@ -12100,6 +12173,17 @@ struct Typechecker {
                 call_span: span
                 args
             )
+
+            // Grab the specialized return type, it may be different from the substituted base type if it contains type-level computations.
+            if resolved_function_id.has_value() {
+                let base_return = .get_function(generic_checked_function_to_instantiate!).return_type_id
+                if .type_contains_deferred_const(type_id: base_return) {
+                    return_type = .substitute_typevars_in_type(
+                        type_id: .get_function(resolved_function_id!).return_type_id
+                        generic_inferences: .generic_inferences
+                    )
+                }
+            }
         }
 
         if .dump_try_hints and callee_throws {
