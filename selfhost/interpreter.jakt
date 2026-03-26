@@ -6893,6 +6893,7 @@ class Interpreter {
                     panic("Invalid control flow")
                 }
             }
+            let match_expr_span = span
             yield match value.impl {
                 Enum(fields,  enum_id, constructor) => {
                     let constructor_name = .program.get_function(constructor).name
@@ -6933,7 +6934,7 @@ class Interpreter {
                     }
 
                     if not catch_all_case.has_value() and not found_body.has_value() {
-                        .error("Match is not exhaustive", span!)
+                        .error("Match is not exhaustive", span ?? match_expr_span)
                         .compiler.panic("Invalid type")
                     }
 
@@ -7066,12 +7067,12 @@ class Interpreter {
                     if found_body is None and catch_all_case is None {
                         .error(
                             format("No match found for value of type {}", value.type_name()),
-                            .spans.last()!)
+                            span ?? match_expr_span)
                         .compiler.panic("Invalid type")
                     }
                     found_body = found_body ?? catch_all_case!
                     mut new_scope = InterpreterScope::create(parent: scope, compiler: .compiler, runtime_scope_id: scope.runtime_scope_id)
-                    defer new_scope.perform_defers(interpreter: this, span: span!)
+                    defer new_scope.perform_defers(interpreter: this, span: span ?? match_expr_span)
 
                     let optional_payload = .optional_payload_if_present(value.impl)
                     if found_args is Some(args) and args.size() > 0 and optional_payload is Some(payload) {
