@@ -193,7 +193,7 @@ namespace Reflect {
     enum Visibility {
         Public
         Private
-        // Restricted(whitelist: [Reflect::Type])
+        Restricted(whitelist: [Reflect::Type])
     }
     struct VariableDeclaration {
         name: String
@@ -210,15 +210,42 @@ namespace Reflect {
         //     }
         // }
     }
+    struct Parameter {
+        name: String
+        type: Reflect::Type
+        is_mutable: bool
+        requires_label: bool
+        has_default: bool
+    }
     struct Method {
         function: Reflect::Function
         visibility: Reflect::Visibility
     }
+    struct Block {
+        statements: [Reflect::Statement]
+    }
+    boxed enum Statement {
+        Expression(span: Reflect::Span)
+        VarDecl(name: String, type: Reflect::Type, span: Reflect::Span)
+        If(span: Reflect::Span)
+        Block(block: Reflect::Block, span: Reflect::Span)
+        Loop(block: Reflect::Block, span: Reflect::Span)
+        While(span: Reflect::Span)
+        Return(span: Reflect::Span)
+        Throw(span: Reflect::Span)
+        Yield(span: Reflect::Span)
+        Break(span: Reflect::Span)
+        Continue(span: Reflect::Span)
+        Defer(span: Reflect::Span)
+        InlineCpp(span: Reflect::Span)
+        Garbage(span: Reflect::Span)
+        DestructuringDeclaration(span: Reflect::Span)
+    }
     struct Function {
         name: String
-        // parameters: [Reflect::Parameter]
+        parameters: [Reflect::Parameter]
         generic_parameters: [String]
-        // block: Reflect::Block
+        block: Reflect::Block
         return_type: Reflect::Type
         can_throw: bool
         is_comptime: bool
@@ -228,11 +255,15 @@ namespace Reflect {
         Typed(name: String, type: Reflect::Type)
         Untyped(name: String)
     }
+    struct ValueEnumVariant {
+        name: String
+        has_value: bool
+        value: i64
+    }
     enum RecordType {
         Struct(fields: [Reflect::Field])
         Class(fields: [Reflect::Field])
-        // FIXME: Variants should map to a value.
-        ValueEnum(underlying_type: Reflect::Type, variants: [String])
+        ValueEnum(underlying_type: Reflect::Type, variants: [Reflect::ValueEnumVariant])
         SumEnum(is_boxed: bool, variants: [Reflect::SumEnumVariant])
     }
     struct Record {
@@ -261,11 +292,12 @@ namespace Reflect {
         Unknown
         Never
         StructureOrEnum(Reflect::Record)
-        TypeVariable(String)
+        TypeVariable(name: String, bounds: [Reflect::Type])
+        Trait(name: String, methods: [Reflect::Method], generic_parameters: [String])
         RawPtr(Reflect::Type)
         Reference(Reflect::Type)
         MutableReference(Reflect::Type)
-        Function
+        Function(params: [Reflect::Type], return_type: Reflect::Type, can_throw: bool)
 
         fn name(this) throws => match this {
             Void => "void"
@@ -288,10 +320,11 @@ namespace Reflect {
             Never => "never"
             StructureOrEnum(record) => format("struct {}", record.name)
             TypeVariable(name) => format("{}", name)
+            Trait(name) => format("trait {}", name)
             RawPtr(type) => format("raw {}", type.name())
             Reference(type) => format("& {}", type.name())
             MutableReference(type) => format("&mut {}", type.name())
-            Function => "fn"
+            Function(params, return_type, can_throw) => format("fn() -> {}", return_type.name())
         }
     }
 }

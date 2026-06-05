@@ -1,0 +1,31 @@
+/// Expect:
+/// - output: "Record: Point\nField: x type i32 mutable true\nField: y type i32 mutable true\n"
+
+struct Point {
+    x: i32
+    y: i32
+}
+
+comptime describe_fields<T>() throws -> String {
+    return match reflect T {
+        StructureOrEnum(record) => {
+            mut result = format("Record: {}\n", record.name)
+            match record.record_type {
+                Struct(fields) => {
+                    for field in fields {
+                        result += format("Field: {} type {} mutable {}\n", field.variable.name, field.variable.type.name(), field.variable.is_mutable)
+                    }
+                }
+                else => {
+                    result += "not a struct\n"
+                }
+            }
+            yield result
+        }
+        else => "not a record"
+    }
+}
+
+fn main() {
+    print("{}", describe_fields<Point>())
+}

@@ -1,0 +1,31 @@
+/// Expect:
+/// - output: "do_public: Public\ndo_private: Private\nWidget: Public\n"
+
+struct Widget {
+    value: i32
+
+    public fn do_public(this) -> i32 => .value
+    private fn do_private(this) -> i32 => .value
+}
+
+comptime describe_visibility<T>() throws -> String {
+    return match reflect T {
+        StructureOrEnum(record) => {
+            mut result = ""
+            for method in record.methods {
+                let vis = match method.visibility {
+                    Public => "Public"
+                    Private => "Private"
+                    Restricted => "Restricted"
+                }
+                result += format("{}: {}\n", method.function.name, vis)
+            }
+            yield result
+        }
+        else => "not a record"
+    }
+}
+
+fn main() {
+    print("{}", describe_visibility<Widget>())
+}

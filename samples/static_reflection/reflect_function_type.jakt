@@ -1,0 +1,35 @@
+/// Expect:
+/// - output: "has fn field: fn() -> void\n"
+
+struct Callback {
+    handler: fn() -> void
+}
+
+comptime describe_fn_field<T>() throws -> String {
+    return match reflect T {
+        StructureOrEnum(record) => {
+            mut result = ""
+            match record.record_type {
+                Struct(fields) => {
+                    for field in fields {
+                        match field.variable.type {
+                            Function(params, return_type, can_throw) => {
+                                result += format("has fn field: {}\n", field.variable.type.name())
+                            }
+                            else => {
+                                result += format("non-fn field: {}\n", field.variable.name)
+                            }
+                        }
+                    }
+                }
+                else => {}
+            }
+            yield result
+        }
+        else => "not a record"
+    }
+}
+
+fn main() {
+    print("{}", describe_fn_field<Callback>())
+}

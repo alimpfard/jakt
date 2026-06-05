@@ -1,0 +1,45 @@
+/// Expect:
+/// - output: "VarDecl: x\nExpression\nReturn\n"
+
+struct Ops {
+    fn work(this) -> i64 {
+        let x = 42
+        println("{}", x)
+        return x
+    }
+}
+
+comptime describe_statements<T>() throws -> String {
+    return match reflect T {
+        StructureOrEnum(record) => {
+            mut result = ""
+            for method in record.methods {
+                let f = method.function
+                if f.name == "work" {
+                    for stmt in f.block.statements {
+                        match stmt {
+                            VarDecl(name, type, span) => {
+                                result += format("VarDecl: {}\n", name)
+                            }
+                            Expression(span) => {
+                                result += "Expression\n"
+                            }
+                            Return(span) => {
+                                result += "Return\n"
+                            }
+                            else => {
+                                result += "Other\n"
+                            }
+                        }
+                    }
+                }
+            }
+            yield result
+        }
+        else => "not a record"
+    }
+}
+
+fn main() {
+    print("{}", describe_statements<Ops>())
+}

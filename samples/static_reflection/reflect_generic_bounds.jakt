@@ -1,0 +1,45 @@
+/// Expect:
+/// - output: "i32 is: I32\nBox<i32> field type is: TypeVariable named T\n"
+
+struct Box<T> {
+    value: T
+}
+
+comptime describe_type<T>() throws -> String {
+    return match reflect T {
+        I32 => "I32"
+        StructureOrEnum(record) => format("struct {}", record.name)
+        TypeVariable(name, bounds) => format("TypeVariable named {}", name)
+        else => "other"
+    }
+}
+
+comptime describe_field_type<T>() throws -> String {
+    return match reflect T {
+        StructureOrEnum(record) => {
+            mut result = ""
+            match record.record_type {
+                Struct(fields) => {
+                    for field in fields {
+                        match field.variable.type {
+                            TypeVariable(name, bounds) => {
+                                result += format("TypeVariable named {}", name)
+                            }
+                            else => {
+                                result += format("{}", field.variable.type.name())
+                            }
+                        }
+                    }
+                }
+                else => {}
+            }
+            yield result
+        }
+        else => "not a record"
+    }
+}
+
+fn main() {
+    println("i32 is: {}", describe_type<i32>())
+    println("Box<i32> field type is: {}", describe_field_type<Box<i32>>())
+}

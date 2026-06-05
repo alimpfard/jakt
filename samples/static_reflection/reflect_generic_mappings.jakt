@@ -1,0 +1,23 @@
+/// Expect:
+/// - output: "Record: Box\nGeneric T mapped to i32\n"
+
+struct Box<T> {
+    value: T
+}
+
+comptime describe_generics<T>() throws -> String {
+    return match reflect T {
+        StructureOrEnum(record) => {
+            mut result = format("Record: {}\n", record.name)
+            for mapping in record.generic_mappings {
+                result += format("Generic {} mapped to {}\n", mapping.0, mapping.1.name())
+            }
+            yield result
+        }
+        else => "not a record"
+    }
+}
+
+fn main() {
+    print("{}", describe_generics<Box<i32>>())
+}

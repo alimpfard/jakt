@@ -1,0 +1,28 @@
+/// Expect:
+/// - output: "Methods of Greeter:\n  greet can_throw:true is_comptime:false\n  Greeter can_throw:false is_comptime:false\n"
+
+struct Greeter {
+    name: String
+
+    fn greet(this) throws -> String {
+        return format("Hello, {}!", .name)
+    }
+}
+
+comptime describe_methods<T>() throws -> String {
+    return match reflect T {
+        StructureOrEnum(record) => {
+            mut result = format("Methods of {}:\n", record.name)
+            for method in record.methods {
+                let f = method.function
+                result += format("  {} can_throw:{} is_comptime:{}\n", f.name, f.can_throw, f.is_comptime)
+            }
+            yield result
+        }
+        else => "not a record"
+    }
+}
+
+fn main() {
+    print("{}", describe_methods<Greeter>())
+}

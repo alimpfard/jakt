@@ -1,0 +1,43 @@
+/// Expect:
+/// - output: "Enum: Shape\nis_boxed: false\nVariant: Circle (typed)\nVariant: Rectangle (struct-like, 2 fields)\nVariant: Nothing (untyped)\n"
+
+enum Shape {
+    Circle(f64)
+    Rectangle(width: f64, height: f64)
+    Nothing
+}
+
+comptime describe_enum<T>() throws -> String {
+    return match reflect T {
+        StructureOrEnum(record) => {
+            mut result = format("Enum: {}\n", record.name)
+            match record.record_type {
+                SumEnum(is_boxed, variants) => {
+                    result += format("is_boxed: {}\n", is_boxed)
+                    for variant in variants {
+                        match variant {
+                            Typed(name, type) => {
+                                result += format("Variant: {} (typed)\n", name)
+                            }
+                            StructLike(name, fields) => {
+                                result += format("Variant: {} (struct-like, {} fields)\n", name, fields.size())
+                            }
+                            Untyped(name) => {
+                                result += format("Variant: {} (untyped)\n", name)
+                            }
+                        }
+                    }
+                }
+                else => {
+                    result += "not a sum enum\n"
+                }
+            }
+            yield result
+        }
+        else => "not a record"
+    }
+}
+
+fn main() {
+    print("{}", describe_enum<Shape>())
+}

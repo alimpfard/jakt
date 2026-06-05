@@ -1,0 +1,33 @@
+/// Expect:
+/// - output: "Enum: Color\nunderlying: i64\nVariant: Red has_value:true value:1\nVariant: Green has_value:true value:2\nVariant: Blue has_value:true value:4\n"
+
+enum Color: i64 {
+    Red = 1
+    Green = 2
+    Blue = 4
+}
+
+comptime describe_value_enum<T>() throws -> String {
+    return match reflect T {
+        StructureOrEnum(record) => {
+            mut result = format("Enum: {}\n", record.name)
+            match record.record_type {
+                ValueEnum(underlying_type, variants) => {
+                    result += format("underlying: {}\n", underlying_type.name())
+                    for v in variants {
+                        result += format("Variant: {} has_value:{} value:{}\n", v.name, v.has_value, v.value)
+                    }
+                }
+                else => {
+                    result += "not a value enum\n"
+                }
+            }
+            yield result
+        }
+        else => "not a record"
+    }
+}
+
+fn main() {
+    print("{}", describe_value_enum<Color>())
+}

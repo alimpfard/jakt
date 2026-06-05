@@ -1,0 +1,29 @@
+/// Expect:
+/// - output: "fn add: 3 params\n  this: mutable:false label:false default:false\n  a: mutable:false label:true default:false\n  b: mutable:false label:true default:true\n"
+
+struct Calculator {
+    fn add(this, a: i32, b: i32 = 0) -> i32 => a + b
+}
+
+comptime describe_params<T>() throws -> String {
+    return match reflect T {
+        StructureOrEnum(record) => {
+            mut result = ""
+            for method in record.methods {
+                let f = method.function
+                if f.name == "add" {
+                    result += format("fn {}: {} params\n", f.name, f.parameters.size())
+                    for param in f.parameters {
+                        result += format("  {}: mutable:{} label:{} default:{}\n", param.name, param.is_mutable, param.requires_label, param.has_default)
+                    }
+                }
+            }
+            yield result
+        }
+        else => "not a record"
+    }
+}
+
+fn main() {
+    print("{}", describe_params<Calculator>())
+}

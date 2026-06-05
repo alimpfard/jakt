@@ -1,0 +1,35 @@
+/// Expect:
+/// - output: "raw_ptr: raw i32\n"
+
+struct Ptrs {
+    raw_ptr: raw i32
+}
+
+comptime describe_ptr_types<T>() throws -> String {
+    return match reflect T {
+        StructureOrEnum(record) => {
+            mut result = ""
+            match record.record_type {
+                Struct(fields) => {
+                    for field in fields {
+                        match field.variable.type {
+                            RawPtr(inner) => {
+                                result += format("{}: raw {}\n", field.variable.name, inner.name())
+                            }
+                            else => {
+                                result += format("{}: {}\n", field.variable.name, field.variable.type.name())
+                            }
+                        }
+                    }
+                }
+                else => {}
+            }
+            yield result
+        }
+        else => "not a record"
+    }
+}
+
+fn main() {
+    print("{}", describe_ptr_types<Ptrs>())
+}

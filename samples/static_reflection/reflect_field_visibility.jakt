@@ -1,0 +1,38 @@
+/// Expect:
+/// - output: "pub_field: Public\npriv_field: Private\n"
+
+class Thing {
+    public pub_field: i32
+    private priv_field: i32
+
+    public fn create() throws -> Thing => Thing(pub_field: 1, priv_field: 2)
+}
+
+comptime describe_field_visibility<T>() throws -> String {
+    return match reflect T {
+        StructureOrEnum(record) => {
+            mut result = ""
+            match record.record_type {
+                Struct(fields) | Class(fields) => {
+                    for field in fields {
+                        let vis = match field.visibility {
+                            Public => "Public"
+                            Private => "Private"
+                            Restricted => "Restricted"
+                        }
+                        result += format("{}: {}\n", field.variable.name, vis)
+                    }
+                }
+                else => {
+                    result += "not a struct/class"
+                }
+            }
+            yield result
+        }
+        else => "not a record"
+    }
+}
+
+fn main() {
+    print("{}", describe_field_visibility<Thing>())
+}

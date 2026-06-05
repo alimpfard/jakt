@@ -1896,7 +1896,7 @@ boxed enum CheckedExpression {
         EnumVariantArg(arg) => arg.type_id
         NamespacedVar(var) => var.type_id
         Var(var) => var.type_id
-        ComptimeIndex => builtin(BuiltinType::Unknown) // FIXME
+        ComptimeIndex => builtin(BuiltinType::Unknown) // context-dependent.
         else(type_id) => type_id
     }
 

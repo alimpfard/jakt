@@ -7442,6 +7442,20 @@ class Interpreter {
             }
         }
 
+        let parameter_struct_id = match .program.find_reflected_primitive("Parameter") {
+            Struct(id) => id
+            else => {
+                panic("Expected Parameter to be a struct")
+            }
+        }
+
+        let block_struct_id = match .program.find_reflected_primitive("Block") {
+            Struct(id) => id
+            else => {
+                panic("Expected Block to be a struct")
+            }
+        }
+
         let method_struct_constructor = .program.find_function_in_scope(
             parent_scope_id: .program.get_struct(method_struct_id).scope_id
             function_name: "Method"
@@ -7452,10 +7466,43 @@ class Interpreter {
             function_name: "Function"
         )!
 
+        let parameter_struct_constructor = .program.find_function_in_scope(
+            parent_scope_id: .program.get_struct(parameter_struct_id).scope_id
+            function_name: "Parameter"
+        )!
+
+        let block_struct_constructor = .program.find_function_in_scope(
+            parent_scope_id: .program.get_struct(block_struct_id).scope_id
+            function_name: "Block"
+        )!
+
         let type_type_id = match .program.find_reflected_primitive("Type") {
             Enum(id) => .program.get_enum(id).type_id
             else => {
                 panic("Expected Type to be an enum")
+            }
+        }
+
+        let visibility_enum_id = match .program.find_reflected_primitive("Visibility") {
+            Enum(id) => id
+            else => {
+                panic("Expected Visibility to be an enum")
+            }
+        }
+        let visibility_public_constructor = .program.find_function_in_scope(
+            parent_scope_id: .program.get_enum(visibility_enum_id).scope_id
+            function_name: "Public")!
+        let visibility_private_constructor = .program.find_function_in_scope(
+            parent_scope_id: .program.get_enum(visibility_enum_id).scope_id
+            function_name: "Private")!
+        let visibility_restricted_constructor = .program.find_function_in_scope(
+            parent_scope_id: .program.get_enum(visibility_enum_id).scope_id
+            function_name: "Restricted")!
+
+        let statement_enum_id = match .program.find_reflected_primitive("Statement") {
+            Enum(id) => id
+            else => {
+                panic("Expected Statement to be an enum")
             }
         }
 
@@ -7464,17 +7511,61 @@ class Interpreter {
         for (name, ids) in scope.functions {
             for id in ids {
                 let function = .program.get_function(id)
+
+                // Reflect parameters
+                mut param_values: [Value] = []
+                for param in function.params {
+                    let param_value = Value(
+                        impl: ValueImpl::Struct(
+                            fields: [
+                                // name:
+                                .string_value(param.variable.name, span)
+                                // type:
+                                .reflect_type(type_id: param.variable.type_id, span, scope: interpreter_scope)
+                                // is_mutable:
+                                .bool_value(param.variable.is_mutable, span)
+                                // requires_label:
+                                .bool_value(param.requires_label, span)
+                                // has_default:
+                                .bool_value(param.default_value_expression.has_value(), span)
+                            ]
+                            struct_id: parameter_struct_id
+                            constructor: parameter_struct_constructor
+                        )
+                        span
+                    )
+                    param_values.push(param_value)
+                }
+
+                // Reflect block
+                let block_value = .reflect_block(
+                    block: function.block
+                    block_struct_id
+                    block_struct_constructor
+                    statement_enum_id
+                    span
+                    scope: interpreter_scope
+                )
+
                 let value = Value(
                     impl: ValueImpl::Struct(
                         fields: [
                             // name:
                             .string_value(name, span)
+                            // parameters:
+                            .array_value_of_type(
+                                values: param_values
+                                type: .array_type_of_struct(parameter_struct_id)
+                                span
+                            )
                             // generic_parameters:
                             .array_value_of_type(
                                 values: []
-                                type: type_type_id
+                                type: .string_type()
                                 span
                             )
+                            // block:
+                            block_value
                             // return_type:
                             .reflect_type(type_id: function.return_type_id, span, scope: interpreter_scope)
                             // can_throw:
@@ -7488,13 +7579,24 @@ class Interpreter {
                     span
                 )
 
+                // Make visibility value for the method
+                let method_visibility = .make_visibility_value(
+                    visibility: function.visibility
+                    visibility_enum_id
+                    visibility_public_constructor
+                    visibility_private_constructor
+                    visibility_restricted_constructor
+                    span
+                    scope: interpreter_scope
+                )
+
                 method_values.push(Value(
                     impl: ValueImpl::Struct(
                         fields: [
                             // function:
                             value
                             // visibility:
-                            // FIXME.
+                            method_visibility
                         ]
                         struct_id: method_struct_id
                         constructor: method_struct_constructor
@@ -7511,6 +7613,107 @@ class Interpreter {
             )
             span
         )
+    }
+
+    public fn make_visibility_value(
+        mut this
+        visibility: CheckedVisibility
+        anon visibility_enum_id: EnumId
+        anon visibility_public_constructor: FunctionId
+        anon visibility_private_constructor: FunctionId
+        anon visibility_restricted_constructor: FunctionId
+        span: Span
+        scope: InterpreterScope
+    ) throws -> Value {
+        return match visibility {
+            Public => Value(
+                impl: ValueImpl::Enum(
+                    fields: []
+                    enum_id: visibility_enum_id
+                    constructor: visibility_public_constructor
+                )
+                span
+            )
+            Private => Value(
+                impl: ValueImpl::Enum(
+                    fields: []
+                    enum_id: visibility_enum_id
+                    constructor: visibility_private_constructor
+                )
+                span
+            )
+            Restricted(scopes) => {
+                let reflected_type_enum_id = match .program.find_reflected_primitive("Type") {
+                    Enum(id) => id
+                    else => {
+                        panic("Expected Type to be an enum")
+                    }
+                }
+                let type_type_id = .program.get_enum(reflected_type_enum_id).type_id
+
+                mut whitelist_values: [Value] = []
+                for maybe_scope in scopes {
+                    let resolved = maybe_scope.try_resolve(program: .program)
+                    match resolved {
+                        Resolved(resolved_scope_id) => {
+                            let resolved_scope = .program.get_scope(resolved_scope_id)
+                            // Try to find the struct or enum that owns this scope
+                            mut found = false
+                            for (sname, sid) in resolved_scope.structs {
+                                whitelist_values.push(.reflect_type(
+                                    type_id: .program.get_struct(sid).type_id
+                                    span
+                                    scope
+                                ))
+                                found = true
+                                break
+                            }
+                            if not found {
+                                for (ename, eid) in resolved_scope.enums {
+                                    whitelist_values.push(.reflect_type(
+                                        type_id: .program.get_enum(eid).type_id
+                                        span
+                                        scope
+                                    ))
+                                    found = true
+                                    break
+                                }
+                            }
+                            if not found {
+                                let unknown_constructor = .program.find_function_in_scope(
+                                    parent_scope_id: .program.get_enum(reflected_type_enum_id).scope_id
+                                    function_name: "Unknown")!
+                                whitelist_values.push(Value(
+                                    impl: ValueImpl::Enum(
+                                        fields: []
+                                        enum_id: reflected_type_enum_id
+                                        constructor: unknown_constructor
+                                    )
+                                    span
+                                ))
+                            }
+                        }
+                        else => {}
+                    }
+                }
+
+                yield Value(
+                    impl: ValueImpl::Enum(
+                        fields: [
+                            // whitelist:
+                            .array_value_of_type(
+                                values: whitelist_values
+                                type: type_type_id
+                                span
+                            )
+                        ]
+                        enum_id: visibility_enum_id
+                        constructor: visibility_restricted_constructor
+                    )
+                    span
+                )
+            }
+        }
     }
 
     public fn reflect_fields(mut this, fields: [VarId], span: Span, scope: InterpreterScope) throws -> [Value] {
@@ -7537,6 +7740,9 @@ class Interpreter {
         let visibility_private_constructor = .program.find_function_in_scope(
             parent_scope_id: .program.get_enum(visibility_enum_id).scope_id
             function_name: "Private")!
+        let visibility_restricted_constructor = .program.find_function_in_scope(
+            parent_scope_id: .program.get_enum(visibility_enum_id).scope_id
+            function_name: "Restricted")!
 
         let variable_declaration_struct_id = match .program.find_reflected_primitive("VariableDeclaration") {
             Struct(id) => id
@@ -7579,19 +7785,14 @@ class Interpreter {
                         // variable:
                         variable
                         // visibility:
-                        Value(
-                            impl: ValueImpl::Enum(
-                                fields: []
-                                enum_id: visibility_enum_id
-                                constructor: match field.visibility {
-                                    Public => visibility_public_constructor
-                                    Private => visibility_private_constructor
-                                    else => {
-                                        panic("Not implemented")
-                                    }
-                                }
-                            )
+                        .make_visibility_value(
+                            visibility: field.visibility
+                            visibility_enum_id
+                            visibility_public_constructor
+                            visibility_private_constructor
+                            visibility_restricted_constructor
                             span
+                            scope
                         )
                     ]
                     struct_id: field_struct_id
@@ -7606,13 +7807,89 @@ class Interpreter {
     }
 
     public fn reflect_value_enum_variants(mut this, subject_enum: CheckedEnum, span: Span, scope: InterpreterScope) throws -> [Value] {
-        // [String], names of the variants
-        let type = .array_type_of_struct(.program.find_struct_in_prelude("String"))
+        let variant_struct_id = match .program.find_reflected_primitive("ValueEnumVariant") {
+            Struct(id) => id
+            else => {
+                panic("Expected ValueEnumVariant to be a struct")
+            }
+        }
+        let variant_struct_constructor = .program.find_function_in_scope(
+            parent_scope_id: .program.get_struct(variant_struct_id).scope_id
+            function_name: "ValueEnumVariant")!
+
         mut result_elements: [Value] = []
         for entry in subject_enum.variants {
             match entry {
-                Untyped(name) | WithValue(name) => {
-                    result_elements.push(.string_value(name, span))
+                Untyped(name) => {
+                    result_elements.push(Value(
+                        impl: ValueImpl::Struct(
+                            fields: [
+                                // name:
+                                .string_value(name, span)
+                                // has_value:
+                                .bool_value(false, span)
+                                // value:
+                                Value(impl: ValueImpl::I64(0), span)
+                            ]
+                            struct_id: variant_struct_id
+                            constructor: variant_struct_constructor
+                        )
+                        span
+                    ))
+                }
+                WithValue(name, expr) => {
+                    mut int_value: i64 = 0
+                    // Try direct numeric constant first
+                    mut found = false
+                    match expr {
+                        NumericConstant(val) => {
+                            let nc = val.number_constant()
+                            if nc.has_value() {
+                                match nc! {
+                                    Signed(v) => { int_value = v; found = true }
+                                    Unsigned(v) => { int_value = v as! i64; found = true }
+                                    Floating(v) => { int_value = v as! i64; found = true }
+                                }
+                            }
+                        }
+                        else => {}
+                    }
+                    // It's not a constant, try evaluating the expression
+                    if not found {
+                        let result = .execute_expression(expr, scope)
+                        match result {
+                            JustValue(value) | Return(value) => {
+                                match value.impl {
+                                    I8(v) => { int_value = v as! i64 }
+                                    I16(v) => { int_value = v as! i64 }
+                                    I32(v) => { int_value = v as! i64 }
+                                    I64(v) => { int_value = v }
+                                    U8(v) => { int_value = v as! i64 }
+                                    U16(v) => { int_value = v as! i64 }
+                                    U32(v) => { int_value = v as! i64 }
+                                    U64(v) => { int_value = v as! i64 }
+                                    USize(v) => { int_value = v as! i64 }
+                                    else => {}
+                                }
+                            }
+                            else => {}
+                        }
+                    }
+                    result_elements.push(Value(
+                        impl: ValueImpl::Struct(
+                            fields: [
+                                // name:
+                                .string_value(name, span)
+                                // has_value:
+                                .bool_value(true, span)
+                                // value:
+                                Value(impl: ValueImpl::I64(int_value), span)
+                            ]
+                            struct_id: variant_struct_id
+                            constructor: variant_struct_constructor
+                        )
+                        span
+                    ))
                 }
                 else => {
                     .error("Expected untyped or with-value variant", span)
@@ -7621,7 +7898,7 @@ class Interpreter {
             }
         }
 
-        return [.array_value_of_type(values: result_elements, type: type, span)]
+        return result_elements
     }
 
     public fn reflect_sum_enum_variants(mut this, subject_enum: CheckedEnum, span: Span, scope: InterpreterScope) throws -> [Value] {
@@ -7709,6 +7986,321 @@ class Interpreter {
         return result
     }
 
+    public fn reflect_span(mut this, anon source_span: Span, span: Span) throws -> Value {
+        let span_struct_id = match .program.find_reflected_primitive("Span") {
+            Struct(id) => id
+            else => {
+                panic("Expected Span to be a struct")
+            }
+        }
+        let span_struct_constructor = .program.find_function_in_scope(
+            parent_scope_id: .program.get_struct(span_struct_id).scope_id
+            function_name: "Span")!
+
+        let file_name = match .compiler.get_file_path(source_span.file_id) {
+            Some(path) => format("{}", path)
+            None => "<unknown>"
+        }
+
+        return Value(
+            impl: ValueImpl::Struct(
+                fields: [
+                    // start:
+                    Value(impl: ValueImpl::USize(source_span.start), span)
+                    // end:
+                    Value(impl: ValueImpl::USize(source_span.end), span)
+                    // file:
+                    .string_value(file_name, span)
+                ]
+                struct_id: span_struct_id
+                constructor: span_struct_constructor
+            )
+            span
+        )
+    }
+
+    public fn reflect_block(
+        mut this
+        block: CheckedBlock
+        anon block_struct_id: StructId
+        anon block_struct_constructor: FunctionId
+        anon statement_enum_id: EnumId
+        span: Span
+        scope: InterpreterScope
+    ) throws -> Value {
+        mut statement_values: [Value] = []
+        for statement in block.statements {
+            statement_values.push(.reflect_statement(
+                statement
+                statement_enum_id
+                block_struct_id
+                block_struct_constructor
+                span
+                scope
+            ))
+        }
+
+        let statement_type_id = .program.get_enum(statement_enum_id).type_id
+        return Value(
+            impl: ValueImpl::Struct(
+                fields: [
+                    // statements:
+                    .array_value_of_type(
+                        values: statement_values
+                        type: statement_type_id
+                        span
+                    )
+                ]
+                struct_id: block_struct_id
+                constructor: block_struct_constructor
+            )
+            span
+        )
+    }
+
+    public fn reflect_statement(
+        mut this
+        anon statement: CheckedStatement
+        anon statement_enum_id: EnumId
+        anon block_struct_id: StructId
+        anon block_struct_constructor: FunctionId
+        span: Span
+        scope: InterpreterScope
+    ) throws -> Value {
+        let enum_scope_id = .program.get_enum(statement_enum_id).scope_id
+        return match statement {
+            Expression(expr, span: stmt_span) => {
+                let constructor = .program.find_function_in_scope(
+                    parent_scope_id: enum_scope_id
+                    function_name: "Expression")!
+                yield Value(
+                    impl: ValueImpl::Enum(
+                        fields: [.reflect_span(stmt_span, span)]
+                        enum_id: statement_enum_id
+                        constructor
+                    )
+                    span
+                )
+            }
+            VarDecl(var_id, init, span: stmt_span) => {
+                let constructor = .program.find_function_in_scope(
+                    parent_scope_id: enum_scope_id
+                    function_name: "VarDecl")!
+                let variable = .program.get_variable(var_id)
+                yield Value(
+                    impl: ValueImpl::Enum(
+                        fields: [
+                            // name:
+                            .string_value(variable.name, span)
+                            // type:
+                            .reflect_type(type_id: variable.type_id, span, scope)
+                            // span:
+                            .reflect_span(stmt_span, span)
+                        ]
+                        enum_id: statement_enum_id
+                        constructor
+                    )
+                    span
+                )
+            }
+            If(span: stmt_span) => {
+                let constructor = .program.find_function_in_scope(
+                    parent_scope_id: enum_scope_id
+                    function_name: "If")!
+                yield Value(
+                    impl: ValueImpl::Enum(
+                        fields: [.reflect_span(stmt_span, span)]
+                        enum_id: statement_enum_id
+                        constructor
+                    )
+                    span
+                )
+            }
+            Block(block, span: stmt_span) => {
+                let constructor = .program.find_function_in_scope(
+                    parent_scope_id: enum_scope_id
+                    function_name: "Block")!
+                let block_value = .reflect_block(
+                    block
+                    block_struct_id
+                    block_struct_constructor
+                    statement_enum_id
+                    span
+                    scope
+                )
+                yield Value(
+                    impl: ValueImpl::Enum(
+                        fields: [
+                            block_value
+                            .reflect_span(stmt_span, span)
+                        ]
+                        enum_id: statement_enum_id
+                        constructor
+                    )
+                    span
+                )
+            }
+            Loop(block, span: stmt_span) => {
+                let constructor = .program.find_function_in_scope(
+                    parent_scope_id: enum_scope_id
+                    function_name: "Loop")!
+                let block_value = .reflect_block(
+                    block
+                    block_struct_id
+                    block_struct_constructor
+                    statement_enum_id
+                    span
+                    scope
+                )
+                yield Value(
+                    impl: ValueImpl::Enum(
+                        fields: [
+                            block_value
+                            .reflect_span(stmt_span, span)
+                        ]
+                        enum_id: statement_enum_id
+                        constructor
+                    )
+                    span
+                )
+            }
+            While(span: stmt_span) => {
+                let constructor = .program.find_function_in_scope(
+                    parent_scope_id: enum_scope_id
+                    function_name: "While")!
+                yield Value(
+                    impl: ValueImpl::Enum(
+                        fields: [.reflect_span(stmt_span, span)]
+                        enum_id: statement_enum_id
+                        constructor
+                    )
+                    span
+                )
+            }
+            Return(span: stmt_span) => {
+                let constructor = .program.find_function_in_scope(
+                    parent_scope_id: enum_scope_id
+                    function_name: "Return")!
+                let reflected_span = match stmt_span {
+                    Some(s) => .reflect_span(s, span)
+                    None => .reflect_span(span, span)
+                }
+                yield Value(
+                    impl: ValueImpl::Enum(
+                        fields: [reflected_span]
+                        enum_id: statement_enum_id
+                        constructor
+                    )
+                    span
+                )
+            }
+            Throw(span: stmt_span) => {
+                let constructor = .program.find_function_in_scope(
+                    parent_scope_id: enum_scope_id
+                    function_name: "Throw")!
+                yield Value(
+                    impl: ValueImpl::Enum(
+                        fields: [.reflect_span(stmt_span, span)]
+                        enum_id: statement_enum_id
+                        constructor
+                    )
+                    span
+                )
+            }
+            Yield(span: stmt_span) => {
+                let constructor = .program.find_function_in_scope(
+                    parent_scope_id: enum_scope_id
+                    function_name: "Yield")!
+                yield Value(
+                    impl: ValueImpl::Enum(
+                        fields: [.reflect_span(stmt_span, span)]
+                        enum_id: statement_enum_id
+                        constructor
+                    )
+                    span
+                )
+            }
+            Break(stmt_span) => {
+                let constructor = .program.find_function_in_scope(
+                    parent_scope_id: enum_scope_id
+                    function_name: "Break")!
+                yield Value(
+                    impl: ValueImpl::Enum(
+                        fields: [.reflect_span(stmt_span, span)]
+                        enum_id: statement_enum_id
+                        constructor
+                    )
+                    span
+                )
+            }
+            Continue(stmt_span) => {
+                let constructor = .program.find_function_in_scope(
+                    parent_scope_id: enum_scope_id
+                    function_name: "Continue")!
+                yield Value(
+                    impl: ValueImpl::Enum(
+                        fields: [.reflect_span(stmt_span, span)]
+                        enum_id: statement_enum_id
+                        constructor
+                    )
+                    span
+                )
+            }
+            Defer(span: stmt_span) => {
+                let constructor = .program.find_function_in_scope(
+                    parent_scope_id: enum_scope_id
+                    function_name: "Defer")!
+                yield Value(
+                    impl: ValueImpl::Enum(
+                        fields: [.reflect_span(stmt_span, span)]
+                        enum_id: statement_enum_id
+                        constructor
+                    )
+                    span
+                )
+            }
+            InlineCpp(span: stmt_span) => {
+                let constructor = .program.find_function_in_scope(
+                    parent_scope_id: enum_scope_id
+                    function_name: "InlineCpp")!
+                yield Value(
+                    impl: ValueImpl::Enum(
+                        fields: [.reflect_span(stmt_span, span)]
+                        enum_id: statement_enum_id
+                        constructor
+                    )
+                    span
+                )
+            }
+            Garbage(stmt_span) => {
+                let constructor = .program.find_function_in_scope(
+                    parent_scope_id: enum_scope_id
+                    function_name: "Garbage")!
+                yield Value(
+                    impl: ValueImpl::Enum(
+                        fields: [.reflect_span(stmt_span, span)]
+                        enum_id: statement_enum_id
+                        constructor
+                    )
+                    span
+                )
+            }
+            DestructuringDeclaration(span: stmt_span) => {
+                let constructor = .program.find_function_in_scope(
+                    parent_scope_id: enum_scope_id
+                    function_name: "DestructuringDeclaration")!
+                yield Value(
+                    impl: ValueImpl::Enum(
+                        fields: [.reflect_span(stmt_span, span)]
+                        enum_id: statement_enum_id
+                        constructor
+                    )
+                    span
+                )
+            }
+        }
+    }
+
     public fn reflect_type(mut this, type_id: TypeId, span: Span, scope: InterpreterScope) throws -> Value {
         let mapped_type_id = scope.map_type(type_id)
 
@@ -7751,32 +8343,62 @@ class Interpreter {
 
                 yield constructor!
             }
-            Trait | GenericTraitInstance => {
-                // FIXME: Actually implement this.
+            Trait(trait_id) | GenericTraitInstance(id: trait_id) => {
+                let trait_info = .program.get_trait(trait_id)
+
                 let constructor = .program.find_function_in_scope(
                     parent_scope_id: .program.get_enum(reflected_enum_id).scope_id
-                    function_name: "TypeVariable")
+                    function_name: "Trait")!
 
-                if not constructor.has_value() {
-                    .error("Attempted to access a variant that does not exist", span)
-                    .compiler.panic("Invalid type")
+                let methods = .reflect_methods(trait_info.scope_id, span, scope)
+
+                mut generic_param_names: [Value] = []
+                for generic_parameter in trait_info.generic_parameters {
+                    let param_name = match .program.get_type(generic_parameter.type_id) {
+                        TypeVariable(name) => name
+                        else => "unknown"
+                    }
+                    generic_param_names.push(.string_value(param_name, span))
                 }
+                let string_type = .string_type()
+                let generic_params_array = .array_value_of_type(
+                    values: generic_param_names
+                    type: string_type
+                    span
+                )
 
-                fields = [.string_value("anon$trait_impl", span)]
-                yield constructor!
+                fields = [
+                    // name:
+                    .string_value(trait_info.name, span)
+                    // methods:
+                    methods
+                    // generic_parameters:
+                    generic_params_array
+                ]
+                yield constructor
             }
-            TypeVariable(name) => {
+            TypeVariable(name, trait_implementations) => {
                 let constructor = .program.find_function_in_scope(
                     parent_scope_id: .program.get_enum(reflected_enum_id).scope_id
-                    function_name: "TypeVariable")
+                    function_name: "TypeVariable")!
 
-                if not constructor.has_value() {
-                    .error("Attempted to access a variant that does not exist", span)
-                    .compiler.panic("Invalid type")
+                mut bounds: [Value] = []
+                for trait_type_id in trait_implementations {
+                    bounds.push(.reflect_type(type_id: trait_type_id, span, scope))
                 }
+                let bounds_array = .array_value_of_type(
+                    values: bounds
+                    type: reflected_enum.type_id
+                    span
+                )
 
-                fields = [.string_value(name, span)]
-                yield constructor!
+                fields = [
+                    // name:
+                    .string_value(name, span)
+                    // bounds:
+                    bounds_array
+                ]
+                yield constructor
             }
             RawPtr(type_id) | Reference(type_id) | MutableReference(type_id) => {
                 let constructor = .program.find_function_in_scope(
@@ -7930,7 +8552,7 @@ class Interpreter {
                     }
                 }
 
-                let is_value_enum = subject_enum.underlying_type_id.equals(unknown_type_id())
+                let is_value_enum = not subject_enum.underlying_type_id.equals(builtin(BuiltinType::Void))
 
                 let record_type_struct_constructor = match is_value_enum {
                     true => .program.find_function_in_scope(
@@ -7983,6 +8605,12 @@ class Interpreter {
                 }
                 mut record_type_fields: [Value] = []
                 if is_value_enum {
+                    let variant_struct_id = match .program.find_reflected_primitive("ValueEnumVariant") {
+                        Struct(id) => id
+                        else => {
+                            panic("Expected ValueEnumVariant to be a struct")
+                        }
+                    }
                     let variants = .reflect_value_enum_variants(subject_enum, span, scope)
                     record_type_fields = [
                         // underlying_type:
@@ -7991,7 +8619,7 @@ class Interpreter {
                         Value(
                             impl: ValueImpl::JaktArray(
                                 values: variants
-                                type_id: .array_type_of_struct(field_struct_id)
+                                type_id: .array_type_of_struct(variant_struct_id)
                             )
                             span
                         )
@@ -8039,22 +8667,61 @@ class Interpreter {
 
                 yield constructor!
             }
-            Function => {
-                // FIXME: Actually fill the contents.
+            Function(params: param_type_ids, can_throw, return_type_id) => {
                 let constructor = .program.find_function_in_scope(
                     parent_scope_id: .program.get_enum(reflected_enum_id).scope_id
-                    function_name: "Function")
+                    function_name: "Function")!
 
-                if not constructor.has_value() {
-                    .error("Attempted to access a variant that does not exist", span)
-                    .compiler.panic("Invalid type")
+                mut param_types: [Value] = []
+                for param_type_id in param_type_ids {
+                    param_types.push(.reflect_type(type_id: param_type_id, span, scope))
                 }
 
-                fields = []
-                yield constructor!
+                fields = [
+                    // params:
+                    .array_value_of_type(
+                        values: param_types
+                        type: reflected_enum.type_id
+                        span
+                    )
+                    // return_type:
+                    .reflect_type(type_id: return_type_id, span, scope)
+                    // can_throw:
+                    .bool_value(can_throw, span)
+                ]
+                yield constructor
             }
-            else => {
-                // FIXME: Implement these
+            Self => {
+                // Self is a type variable referring to the enclosing type
+                let constructor = .program.find_function_in_scope(
+                    parent_scope_id: .program.get_enum(reflected_enum_id).scope_id
+                    function_name: "TypeVariable")!
+                fields = [
+                    // name:
+                    .string_value("Self", span)
+                    // bounds:
+                    .array_value_of_type(values: [], type: reflected_enum.type_id, span)
+                ]
+                yield constructor
+            }
+            Const => {
+                // TODO: Handle this properly when we have value reflection
+                let constructor = .program.find_function_in_scope(
+                    parent_scope_id: .program.get_enum(reflected_enum_id).scope_id
+                    function_name: "Unknown")!
+                fields = []
+                yield constructor
+            }
+            DeferredConst => {
+                // We have no idea what this is yet.
+                let constructor = .program.find_function_in_scope(
+                    parent_scope_id: .program.get_enum(reflected_enum_id).scope_id
+                    function_name: "Unknown")!
+                fields = []
+                yield constructor
+            }
+            Dependent => {
+                // We have no idea what this is yet.
                 let constructor = .program.find_function_in_scope(
                     parent_scope_id: .program.get_enum(reflected_enum_id).scope_id
                     function_name: "Unknown")!

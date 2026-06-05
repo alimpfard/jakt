@@ -1,0 +1,49 @@
+/// Expect:
+/// - output: "fn do_stuff has 3 statements\n"
+
+struct Example {
+    fn do_stuff(this) -> i64 {
+        let x = 1
+        let y = 2
+        return x + y
+    }
+}
+
+comptime count_statements<T>() throws -> String {
+    return match reflect T {
+        StructureOrEnum(record) => {
+            mut result = ""
+            for method in record.methods {
+                let f = method.function
+                if f.name == "do_stuff" {
+                    for stmt in f.block.statements {
+                        match stmt {
+                            Expression => {}
+                            VarDecl => {}
+                            If => {}
+                            Block => {}
+                            Loop => {}
+                            While => {}
+                            Return => {}
+                            Throw => {}
+                            Yield => {}
+                            Break => {}
+                            Continue => {}
+                            Defer => {}
+                            InlineCpp => {}
+                            Garbage => {}
+                            DestructuringDeclaration => {}
+                        }
+                    }
+                    result += format("fn {} has {} statements\n", f.name, f.block.statements.size())
+                }
+            }
+            yield result
+        }
+        else => "not a record"
+    }
+}
+
+fn main() {
+    print("{}", count_statements<Example>())
+}

@@ -1,0 +1,19 @@
+/// Expect:
+/// - output: "bool: Bool\ni32: I32\nvoid: Void\nu8: U8\n"
+
+comptime type_name<T>() throws -> String {
+    return match reflect T {
+        Bool => "Bool"
+        I32 => "I32"
+        Void => "Void"
+        U8 => "U8"
+        else => "other"
+    }
+}
+
+fn main() {
+    println("bool: {}", type_name<bool>())
+    println("i32: {}", type_name<i32>())
+    println("void: {}", type_name<void>())
+    println("u8: {}", type_name<u8>())
+}
